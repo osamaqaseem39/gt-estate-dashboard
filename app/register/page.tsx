@@ -38,7 +38,7 @@ export default function RegisterPage() {
         const isNetworkError = !error?.response
         if (isNetworkError) {
           setAllowed(true)
-          toast.error('Cannot reach server. Ensure the backend is running at http://localhost:3002')
+          toast.error(`Cannot reach server. Ensure the backend is running at ${process.env.NEXT_PUBLIC_API_URL || 'https://gt-estate-server.vercel.app'}`)
         } else {
           toast.error('Unable to check registration status. Please try again later.')
           router.replace('/login')
