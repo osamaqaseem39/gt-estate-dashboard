@@ -33,9 +33,16 @@ export default function RegisterPage() {
           toast.error('Admin user already registered. Please sign in.')
           router.replace('/login')
         }
-      } catch (error) {
-        toast.error('Unable to check registration status. Please try again later.')
-        router.replace('/login')
+      } catch (error: any) {
+        // Server unreachable or network error - show form anyway so user can retry after starting server
+        const isNetworkError = !error?.response
+        if (isNetworkError) {
+          setAllowed(true)
+          toast.error('Cannot reach server. Ensure the backend is running at http://localhost:3002')
+        } else {
+          toast.error('Unable to check registration status. Please try again later.')
+          router.replace('/login')
+        }
       } finally {
         setChecking(false)
       }
@@ -61,12 +68,16 @@ export default function RegisterPage() {
     }
   }
 
-  if (checking || !allowed) {
+  if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600" />
       </div>
     )
+  }
+
+  if (!allowed) {
+    return null
   }
 
   return (
