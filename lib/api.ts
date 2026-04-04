@@ -22,6 +22,9 @@ const { axiosBase, serverOrigin } = resolveApiBase()
 /** Use in user-facing copy (e.g. “backend running at …”). */
 export const API_SERVER_ORIGIN = serverOrigin
 
+/** Same base URL as the axios client (`…/api`). Use with `fetch` + FormData so the browser sets multipart boundaries. */
+export const API_AXIOS_BASE = axiosBase
+
 export const api = axios.create({
   baseURL: axiosBase,
   headers: {

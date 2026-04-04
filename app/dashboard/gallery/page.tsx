@@ -1,15 +1,28 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useRef, useState } from 'react'
 import { useQuery } from 'react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Search, Edit, Trash2, Star, Image as ImageIcon } from 'lucide-react'
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  Star,
+  Image as ImageIcon,
+  Upload,
+  RectangleVertical,
+  RectangleHorizontal,
+} from 'lucide-react'
 import { api } from '@/lib/api'
+import { uploadGalleryImageToRemote } from '@/lib/gallery-remote-upload'
 import { toast } from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
+
+type GalleryShape = 'portrait' | 'landscape'
 
 type GalleryFormState = {
   title: string
@@ -17,6 +30,7 @@ type GalleryFormState = {
   imageUrl: string
   category: string
   featured: boolean
+  shape: GalleryShape
 }
 
 const emptyGalleryForm: GalleryFormState = {
@@ -25,6 +39,11 @@ const emptyGalleryForm: GalleryFormState = {
   imageUrl: '',
   category: '',
   featured: false,
+  shape: 'landscape',
+}
+
+function itemShapeFromApi(item: { shape?: string }): GalleryShape {
+  return item.shape === 'portrait' ? 'portrait' : 'landscape'
 }
 
 export default function GalleryPage() {
@@ -34,16 +53,18 @@ export default function GalleryPage() {
   const [editingItem, setEditingItem] = useState<any | null>(null)
   const [form, setForm] = useState<GalleryFormState>(emptyGalleryForm)
   const [saving, setSaving] = useState(false)
-  
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const { data: gallery, refetch } = useQuery('gallery', async () => {
-    const response = await api.get('/gallery')
+    const response = await api.get('/gallery/admin/all')
     return response.data
   })
 
   const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this gallery item?')) {
       try {
-        await api.delete(`/gallery/${id}`)
+        await api.delete(`/gallery/items/${id}`)
         toast.success('Gallery item deleted successfully')
         refetch()
       } catch (error) {
@@ -52,10 +73,10 @@ export default function GalleryPage() {
     }
   }
 
-  const handleToggleFeatured = async (id: string, featured: boolean) => {
+  const handleToggleFeatured = async (id: string, published: boolean) => {
     try {
-      await api.patch(`/gallery/${id}`, { featured: !featured })
-      toast.success(`Item ${!featured ? 'featured' : 'unfeatured'}`)
+      await api.put(`/gallery/items/${id}`, { published: !published })
+      toast.success(`Item ${!published ? 'featured' : 'unfeatured'}`)
       refetch()
     } catch (error) {
       toast.error('Failed to update item status')
@@ -65,18 +86,23 @@ export default function GalleryPage() {
   const startCreate = () => {
     setEditingItem(null)
     setForm(emptyGalleryForm)
+    setPendingFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setShowForm(true)
   }
 
   const startEdit = (item: any) => {
     setEditingItem(item)
     setForm({
-      title: item.title ?? '',
+      title: item.alt ?? item.title ?? '',
       description: item.description ?? '',
       imageUrl: item.imageUrl ?? '',
       category: item.category ?? '',
-      featured: Boolean(item.featured),
+      featured: Boolean(item.published ?? item.featured),
+      shape: itemShapeFromApi(item),
     })
+    setPendingFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setShowForm(true)
   }
 
@@ -84,29 +110,71 @@ export default function GalleryPage() {
     e.preventDefault()
     setSaving(true)
 
-    try {
-      const payload = {
-        title: form.title,
-        description: form.description || undefined,
-        imageUrl: form.imageUrl,
-        category: form.category || 'general',
-        featured: form.featured,
-      }
+    const alt = form.description?.trim()
+      ? `${form.title.trim()}\n${form.description.trim()}`
+      : form.title.trim()
+    const category = form.category.trim() || 'general'
+    const published = form.featured
 
-      if (editingItem) {
-        await api.patch(`/gallery/${editingItem.id}`, payload)
-        toast.success('Gallery item updated successfully')
+    try {
+      if (pendingFile) {
+        const imageUrl = await uploadGalleryImageToRemote(pendingFile)
+        const itemId = editingItem?._id ?? editingItem?.id
+        if (editingItem && itemId) {
+          await api.put(`/gallery/items/${itemId}`, {
+            alt,
+            category,
+            published,
+            shape: form.shape,
+            imageUrl,
+          })
+          toast.success('Gallery item updated successfully')
+        } else {
+          await api.post('/gallery', {
+            alt,
+            imageUrl,
+            category,
+            published,
+            shape: form.shape,
+          })
+          toast.success('Gallery item created successfully')
+        }
       } else {
-        await api.post('/gallery', payload)
-        toast.success('Gallery item created successfully')
+        if (!editingItem && !form.imageUrl.trim()) {
+          toast.error('Add an image file or an image URL')
+          return
+        }
+        if (editingItem) {
+          const payload: Record<string, string | boolean> = {
+            alt,
+            category,
+            published,
+            shape: form.shape,
+          }
+          if (form.imageUrl.trim()) payload.imageUrl = form.imageUrl.trim()
+          await api.put(`/gallery/items/${editingItem._id ?? editingItem.id}`, payload)
+          toast.success('Gallery item updated successfully')
+        } else {
+          await api.post('/gallery', {
+            alt,
+            imageUrl: form.imageUrl.trim(),
+            category,
+            published,
+            shape: form.shape,
+          })
+          toast.success('Gallery item created successfully')
+        }
       }
 
       setShowForm(false)
       setEditingItem(null)
       setForm(emptyGalleryForm)
+      setPendingFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
       refetch()
     } catch (error) {
-      toast.error('Failed to save gallery item')
+      const message = error instanceof Error ? error.message : 'Failed to save gallery item'
+      toast.error(message)
     } finally {
       setSaving(false)
     }
@@ -114,8 +182,9 @@ export default function GalleryPage() {
 
   const filteredGallery =
     gallery?.filter((item: any) => {
+      const caption = String(item.alt ?? item.title ?? '')
       const matchesSearch =
-        item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        caption.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase()))
 
       const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter
@@ -171,17 +240,86 @@ export default function GalleryPage() {
                     placeholder="interior, exterior, project, etc."
                   />
                 </div>
-                <div>
-                  <Label htmlFor="imageUrl">Image URL</Label>
+                <div className="md:col-span-2 space-y-2">
+                  <Label>Image</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      id="gallery-image-file"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null
+                        setPendingFile(f)
+                        if (f) setForm((prev) => ({ ...prev, imageUrl: '' }))
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      {pendingFile ? 'Change file' : 'Upload image'}
+                    </Button>
+                    {pendingFile && (
+                      <span className="text-sm text-gray-600 truncate max-w-[200px]" title={pendingFile.name}>
+                        {pendingFile.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Files upload to your image host first; the returned URL is stored in the gallery. Or paste a URL
+                    directly.
+                  </p>
                   <Input
                     id="imageUrl"
                     value={form.imageUrl}
-                    onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-                    required
+                    onChange={(e) => {
+                      setForm({ ...form, imageUrl: e.target.value })
+                      if (e.target.value) {
+                        setPendingFile(null)
+                        if (fileInputRef.current) fileInputRef.current.value = ''
+                      }
+                    }}
+                    disabled={Boolean(pendingFile)}
                     placeholder="https://example.com/image.jpg"
                   />
                 </div>
-                <div className="flex items-center space-x-2 mt-6">
+                <div className="md:col-span-2 space-y-2">
+                  <Label>Orientation</Label>
+                  <p className="text-xs text-gray-500">
+                    Controls how the image is framed on the public gallery page.
+                  </p>
+                  <div className="inline-flex rounded-lg border border-input p-1 bg-muted/30">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, shape: 'portrait' })}
+                      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        form.shape === 'portrait'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <RectangleVertical className="h-4 w-4" />
+                      Portrait
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, shape: 'landscape' })}
+                      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        form.shape === 'landscape'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <RectangleHorizontal className="h-4 w-4" />
+                      Landscape
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 md:col-span-2">
                   <input
                     id="featured"
                     type="checkbox"
@@ -209,6 +347,8 @@ export default function GalleryPage() {
                     setShowForm(false)
                     setEditingItem(null)
                     setForm(emptyGalleryForm)
+                    setPendingFile(null)
+                    if (fileInputRef.current) fileInputRef.current.value = ''
                   }}
                   disabled={saving}
                 >
@@ -257,29 +397,36 @@ export default function GalleryPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredGallery.map((item: any) => (
-              <div key={item.id} className="bg-white border rounded-lg overflow-hidden shadow-sm">
-                <div className="aspect-w-16 aspect-h-9">
+            {filteredGallery.map((item: any) => {
+              const oid = item._id ?? item.id
+              const thumbAspect =
+                item.shape === 'portrait' ? 'aspect-[3/4]' : 'aspect-[16/9]'
+              return (
+              <div key={oid} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                <div className={`relative w-full overflow-hidden bg-gray-100 ${thumbAspect}`}>
                   <img
                     src={item.imageUrl}
-                    alt={item.title}
-                    className="w-full h-48 object-cover"
+                    alt={(item.alt || item.title || '').split('\n')[0]}
+                    className="absolute inset-0 w-full h-full object-cover"
                   />
                 </div>
                 <div className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="text-lg font-semibold text-gray-900 line-clamp-1">
-                      {item.title}
+                      {(item.alt || item.title || 'Untitled').split('\n')[0]}
                     </h3>
                     <div className="flex space-x-1">
-                      {item.featured && (
+                      {(item.published ?? item.featured) && (
                         <Star className="h-4 w-4 text-yellow-500 fill-current" />
                       )}
                     </div>
                   </div>
                   
-                  <p className="text-sm text-gray-600 mb-2 capitalize">
+                  <p className="text-sm text-gray-600 mb-1 capitalize">
                     {item.category}
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">
+                    {itemShapeFromApi(item) === 'portrait' ? 'Portrait' : 'Landscape'}
                   </p>
                   
                   {item.description && (
@@ -296,11 +443,15 @@ export default function GalleryPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleToggleFeatured(item.id, item.featured)}
-                      className={item.featured ? 'bg-yellow-50 text-yellow-700' : ''}
+                      onClick={() =>
+                        handleToggleFeatured(oid, Boolean(item.published ?? item.featured))
+                      }
+                      className={
+                        (item.published ?? item.featured) ? 'bg-yellow-50 text-yellow-700' : ''
+                      }
                     >
                       <Star className="h-4 w-4 mr-1" />
-                      {item.featured ? 'Featured' : 'Feature'}
+                      {(item.published ?? item.featured) ? 'Featured' : 'Feature'}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => startEdit(item)}>
                       <Edit className="h-4 w-4" />
@@ -308,7 +459,7 @@ export default function GalleryPage() {
                     <Button 
                       size="sm" 
                       variant="outline"
-                      onClick={() => handleDelete(item.id)}
+                      onClick={() => handleDelete(oid)}
                       className="text-red-600 hover:text-red-700"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -316,7 +467,8 @@ export default function GalleryPage() {
                   </div>
                 </div>
               </div>
-            ))}
+            )
+            })}
           </div>
           
           {filteredGallery.length === 0 && (
