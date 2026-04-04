@@ -34,32 +34,45 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
    const [user, setUser] = useState<User | null>(null)
    const [loading, setLoading] = useState(true)
  
-   useEffect(() => {
-     const token = localStorage.getItem('auth_token')
-    if (token) {
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token')
+    if (token && token !== 'undefined') {
       api
         .get<User>('/auth/profile')
         .then((response: AxiosResponse<User>) => {
           setUser(response.data)
         })
-         .catch(() => {
-           localStorage.removeItem('auth_token')
-         })
-         .finally(() => {
-           setLoading(false)
-         })
-     } else {
-       setLoading(false)
-     }
-   }, [])
- 
-   const login = async (email: string, password: string) => {
-     const response = await api.post('/auth/login', { email, password })
-     const { access_token, user: userData } = response.data
- 
-     localStorage.setItem('auth_token', access_token)
-     setUser(userData)
-   }
+        .catch(() => {
+          localStorage.removeItem('auth_token')
+        })
+        .finally(() => {
+          setLoading(false)
+        })
+    } else {
+      if (token === 'undefined') localStorage.removeItem('auth_token')
+      setLoading(false)
+    }
+  }, [])
+
+  const login = async (email: string, password: string) => {
+    const response = await api.post<{
+      token?: string
+      access_token?: string
+      user: { id: string; email: string; role: string; username?: string; name?: string }
+    }>('/auth/login', { email, password })
+    const token = response.data.token ?? response.data.access_token
+    if (!token) {
+      throw new Error('Login response did not include a token')
+    }
+    const userData = response.data.user
+    localStorage.setItem('auth_token', token)
+    setUser({
+      id: String(userData.id),
+      email: userData.email,
+      name: userData.username ?? userData.name ?? '',
+      role: userData.role,
+    })
+  }
  
    const logout = () => {
      localStorage.removeItem('auth_token')
