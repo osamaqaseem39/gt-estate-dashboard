@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
-import { api } from '@/lib/api'
+import { api, API_SERVER_ORIGIN } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -38,7 +38,7 @@ export default function RegisterPage() {
         const isNetworkError = !error?.response
         if (isNetworkError) {
           setAllowed(true)
-          toast.error(`Cannot reach server. Ensure the backend is running at ${process.env.NEXT_PUBLIC_API_URL || 'https://estate-server-nine.vercel.app'}`)
+          toast.error(`Cannot reach server. Ensure the backend is running at ${API_SERVER_ORIGIN}`)
         } else {
           toast.error('Unable to check registration status. Please try again later.')
           router.replace('/login')

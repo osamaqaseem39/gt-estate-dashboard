@@ -11,6 +11,7 @@ export function PropertiesChart() {
     const response = await api.get('/properties')
     return response.data
   })
+  
 
   if (!properties) {
     return <div className="h-64 flex items-center justify-center">Loading...</div>

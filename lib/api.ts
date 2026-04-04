@@ -1,9 +1,29 @@
 import axios from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://estate-server-nine.vercel.app'
+/** Server origin (no `/api`); matches `NEXT_PUBLIC_API_URL` after normalizing. */
+const DEFAULT_ORIGIN = 'https://gt-estate-server-zhly.vercel.app'
+
+function resolveApiBase(): { axiosBase: string; serverOrigin: string } {
+  const trimmed = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_ORIGIN).replace(/\/$/, '')
+  if (trimmed.toLowerCase().endsWith('/api')) {
+    return {
+      axiosBase: trimmed,
+      serverOrigin: trimmed.replace(/\/api$/i, '') || trimmed,
+    }
+  }
+  return {
+    axiosBase: `${trimmed}/api`,
+    serverOrigin: trimmed,
+  }
+}
+
+const { axiosBase, serverOrigin } = resolveApiBase()
+
+/** Use in user-facing copy (e.g. “backend running at …”). */
+export const API_SERVER_ORIGIN = serverOrigin
 
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: axiosBase,
   headers: {
     'Content-Type': 'application/json',
   },
