@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'react-hot-toast'
 
 interface RegisterForm {
+  /** Displayed as "Name"; sent to API as `username`. */
   name: string
   email: string
   password: string
@@ -55,7 +56,9 @@ export default function RegisterPage() {
     setSubmitting(true)
     try {
       await api.post('/auth/register', {
-        ...data,
+        username: data.name,
+        email: data.email,
+        password: data.password,
         role: 'admin',
       })
       toast.success('Admin account created successfully. You can now sign in.')
@@ -97,7 +100,10 @@ export default function RegisterPage() {
                 id="name"
                 type="text"
                 placeholder="Admin User"
-                {...register('name', { required: 'Name is required' })}
+                {...register('name', {
+                  required: 'Name is required',
+                  minLength: { value: 3, message: 'Name must be at least 3 characters' },
+                })}
               />
               {errors.name && (
                 <p className="text-sm text-red-600">{errors.name.message}</p>
