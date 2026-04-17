@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useQuery } from 'react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,8 +17,12 @@ import {
   RectangleVertical,
   RectangleHorizontal,
 } from 'lucide-react'
-import { api } from '@/lib/api'
-import { uploadGalleryImageToRemote } from '@/lib/gallery-remote-upload'
+import { api, resolveDashboardMediaUrl } from '@/lib/api'
+import {
+  assertImageFileWithinUploadLimit,
+  getMaxImageUploadLabel,
+  uploadGalleryImageToRemote,
+} from '@/lib/gallery-remote-upload'
 import { toast } from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -54,7 +58,23 @@ export default function GalleryPage() {
   const [form, setForm] = useState<GalleryFormState>(emptyGalleryForm)
   const [saving, setSaving] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingObjectUrl, setPendingObjectUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!pendingFile) {
+      setPendingObjectUrl(null)
+      return
+    }
+    const u = URL.createObjectURL(pendingFile)
+    setPendingObjectUrl(u)
+    return () => URL.revokeObjectURL(u)
+  }, [pendingFile])
+
+  const imagePreviewSrc = pendingObjectUrl || resolveDashboardMediaUrl(form.imageUrl.trim())
+  const imageUrlDisplay = pendingFile
+    ? `Pending upload: ${pendingFile.name}`
+    : form.imageUrl.trim() || '—'
 
   const { data: gallery, refetch } = useQuery('gallery', async () => {
     const response = await api.get('/gallery/admin/all')
@@ -251,6 +271,16 @@ export default function GalleryPage() {
                       id="gallery-image-file"
                       onChange={(e) => {
                         const f = e.target.files?.[0] ?? null
+                        if (f) {
+                          try {
+                            assertImageFileWithinUploadLimit(f)
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : 'File too large')
+                            e.target.value = ''
+                            setPendingFile(null)
+                            return
+                          }
+                        }
                         setPendingFile(f)
                         if (f) setForm((prev) => ({ ...prev, imageUrl: '' }))
                       }}
@@ -270,8 +300,9 @@ export default function GalleryPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-500">
-                    Files upload to your image host first; the returned URL is stored in the gallery. Or paste a URL
-                    directly.
+                    Files POST to your upload API (<code className="text-[11px]">NEXT_PUBLIC_UPLOAD_API_URL</code>);
+                    the returned URL is saved via the estate API. Max {getMaxImageUploadLabel()} per file. Or paste a
+                    URL directly.
                   </p>
                   <Input
                     id="imageUrl"
@@ -286,6 +317,40 @@ export default function GalleryPage() {
                     disabled={Boolean(pendingFile)}
                     placeholder="https://example.com/image.jpg"
                   />
+                  {(imagePreviewSrc || imageUrlDisplay !== '—') && (
+                    <div className="rounded-lg border border-input bg-muted/30 p-3 mt-2">
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Preview</p>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        {imagePreviewSrc ? (
+                          <div
+                            className={`shrink-0 w-full overflow-hidden rounded-md border border-gray-200 bg-gray-100 ${
+                              form.shape === 'portrait' ? 'max-w-[140px] aspect-[3/4]' : 'sm:w-56 aspect-video'
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={imagePreviewSrc}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src =
+                                  'data:image/svg+xml,' +
+                                  encodeURIComponent(
+                                    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect fill="#e5e7eb" width="160" height="90"/><text x="80" y="50" text-anchor="middle" fill="#9ca3af" font-size="10">No preview</text></svg>',
+                                  )
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <p className="text-xs text-muted-foreground">URL</p>
+                          <p className="text-xs break-all font-mono bg-background border rounded px-2 py-1.5 text-gray-800">
+                            {imageUrlDisplay}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="md:col-span-2 space-y-2">
                   <Label>Orientation</Label>
@@ -401,15 +466,26 @@ export default function GalleryPage() {
               const oid = item._id ?? item.id
               const thumbAspect =
                 item.shape === 'portrait' ? 'aspect-[3/4]' : 'aspect-[16/9]'
+              const thumbSrc = resolveDashboardMediaUrl(String(item.imageUrl ?? ''))
+              const rawUrl = String(item.imageUrl ?? '')
               return (
               <div key={oid} className="bg-white border rounded-lg overflow-hidden shadow-sm">
                 <div className={`relative w-full overflow-hidden bg-gray-100 ${thumbAspect}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={item.imageUrl}
+                    src={thumbSrc || rawUrl}
                     alt={(item.alt || item.title || '').split('\n')[0]}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                 </div>
+                {rawUrl ? (
+                  <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/80">
+                    <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Image URL</p>
+                    <p className="text-[11px] font-mono text-gray-600 break-all line-clamp-2" title={rawUrl}>
+                      {rawUrl}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <h3 className="text-lg font-semibold text-gray-900 line-clamp-1">

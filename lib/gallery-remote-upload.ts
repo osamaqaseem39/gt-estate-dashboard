@@ -1,18 +1,70 @@
 /**
- * Gallery images are sent to a standalone PHP uploader; the API stores the returned URL only.
- * Matches upload.php shape: success + data.url, or success: false + message.
- * Override with NEXT_PUBLIC_GALLERY_UPLOAD_URL. Optional NEXT_PUBLIC_GALLERY_UPLOAD_FIELD (default "file").
+ * File uploads (gallery, property images, etc.) POST multipart to this upload API; the GT Estate API stores the returned URL only.
+ * Response shape: success + data.url (upload.php), or success: false + message.
+ *
+ * Endpoint: NEXT_PUBLIC_UPLOAD_API_URL, or NEXT_PUBLIC_GALLERY_UPLOAD_URL, or default below.
+ * Form field: NEXT_PUBLIC_GALLERY_UPLOAD_FIELD or NEXT_PUBLIC_UPLOAD_API_FIELD (default "file").
+ * Max size: NEXT_PUBLIC_MAX_IMAGE_UPLOAD_BYTES (bytes), default 5 MiB.
  */
 
 const DEFAULT_ENDPOINT = 'https://gt.osamaqaseem.online/upload.php'
+const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
-export function getGalleryUploadEndpoint(): string {
-  const raw = process.env.NEXT_PUBLIC_GALLERY_UPLOAD_URL?.trim() || DEFAULT_ENDPOINT
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw == null || raw.trim() === '') return fallback
+  const n = Number(raw.trim())
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+export function getMaxImageUploadBytes(): number {
+  return parsePositiveInt(process.env.NEXT_PUBLIC_MAX_IMAGE_UPLOAD_BYTES, DEFAULT_MAX_IMAGE_BYTES)
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    const mb = bytes / (1024 * 1024)
+    return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`
+  }
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
+}
+
+/** Human-readable max for form hints, e.g. "5.0 MB". */
+export function getMaxImageUploadLabel(): string {
+  return formatSize(getMaxImageUploadBytes())
+}
+
+export function assertImageFileWithinUploadLimit(file: File): void {
+  const max = getMaxImageUploadBytes()
+  if (file.size > max) {
+    throw new Error(`File is too large (${formatSize(file.size)}). Maximum is ${formatSize(max)}.`)
+  }
+}
+
+export function getUploadApiEndpoint(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_UPLOAD_API_URL?.trim() ||
+    process.env.NEXT_PUBLIC_GALLERY_UPLOAD_URL?.trim() ||
+    DEFAULT_ENDPOINT
   return raw.replace(/\/$/, '')
 }
 
+/** @deprecated Use getUploadApiEndpoint — same value, kept for existing imports. */
+export function getGalleryUploadEndpoint(): string {
+  return getUploadApiEndpoint()
+}
+
+export function getUploadApiFieldName(): string {
+  return (
+    process.env.NEXT_PUBLIC_UPLOAD_API_FIELD?.trim() ||
+    process.env.NEXT_PUBLIC_GALLERY_UPLOAD_FIELD?.trim() ||
+    'file'
+  )
+}
+
+/** @deprecated Use getUploadApiFieldName */
 export function getGalleryUploadFieldName(): string {
-  return process.env.NEXT_PUBLIC_GALLERY_UPLOAD_FIELD?.trim() || 'file'
+  return getUploadApiFieldName()
 }
 
 function resolveMaybeRelativeUrl(url: string, uploadEndpoint: string): string {
@@ -89,9 +141,10 @@ function parseJsonSafe(text: string): unknown {
   }
 }
 
-export async function uploadGalleryImageToRemote(file: File): Promise<string> {
-  const endpoint = getGalleryUploadEndpoint()
-  const field = getGalleryUploadFieldName()
+export async function uploadFileViaUploadApi(file: File): Promise<string> {
+  assertImageFileWithinUploadLimit(file)
+  const endpoint = getUploadApiEndpoint()
+  const field = getUploadApiFieldName()
   const fd = new FormData()
   fd.append(field, file)
 
@@ -120,4 +173,9 @@ export async function uploadGalleryImageToRemote(file: File): Promise<string> {
     )
   }
   return resolveMaybeRelativeUrl(raw, endpoint)
+}
+
+/** Same as uploadFileViaUploadApi — gallery UI historically used this name. */
+export async function uploadGalleryImageToRemote(file: File): Promise<string> {
+  return uploadFileViaUploadApi(file)
 }

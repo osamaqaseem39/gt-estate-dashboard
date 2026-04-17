@@ -51,7 +51,9 @@ export function RecentInquiries({ inquiries }: RecentInquiriesProps) {
                 {inquiry.status}
               </span>
             </div>
-            <p className="text-sm text-gray-500 truncate">{inquiry.email}</p>
+            <p className="text-sm text-gray-500 truncate">
+              {inquiry.email?.trim() ? inquiry.email : 'No email on file'}
+            </p>
             <p className="text-sm text-gray-600 mt-1 line-clamp-2">
               {inquiry.message}
             </p>

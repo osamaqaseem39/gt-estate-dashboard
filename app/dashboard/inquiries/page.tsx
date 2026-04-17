@@ -30,10 +30,15 @@ export default function InquiriesPage() {
   }
 
   const filteredInquiries = inquiries?.filter((inquiry: any) => {
-    const matchesSearch = 
-      inquiry.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inquiry.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inquiry.message.toLowerCase().includes(searchTerm.toLowerCase())
+    const q = searchTerm.toLowerCase()
+    const email = (inquiry.email || '').toLowerCase()
+    const msg = (inquiry.message || '').toLowerCase()
+    const phone = (inquiry.phone || '').toLowerCase()
+    const matchesSearch =
+      (inquiry.name || '').toLowerCase().includes(q) ||
+      email.includes(q) ||
+      msg.includes(q) ||
+      phone.includes(q)
     
     const matchesStatus = statusFilter === 'all' || inquiry.status === statusFilter
     
@@ -103,7 +108,7 @@ export default function InquiriesPage() {
                     <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
                       <div className="flex items-center">
                         <Mail className="h-4 w-4 mr-1" />
-                        {inquiry.email}
+                        {inquiry.email?.trim() ? inquiry.email : '—'}
                       </div>
                       {inquiry.phone && (
                         <div className="flex items-center">
@@ -150,7 +155,11 @@ export default function InquiriesPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => window.open(`mailto:${inquiry.email}`)}
+                      disabled={!inquiry.email?.trim()}
+                      onClick={() => {
+                        const em = inquiry.email?.trim()
+                        if (em) window.open(`mailto:${em}`)
+                      }}
                     >
                       <Mail className="h-4 w-4 mr-1" />
                       Reply

@@ -1,13 +1,18 @@
 'use client'
 
-import { FormEvent, useRef, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from 'react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Plus, Search, Edit, Trash2, Eye } from 'lucide-react'
-import { api, API_AXIOS_BASE, API_SERVER_ORIGIN } from '@/lib/api'
+import { api, resolveDashboardMediaUrl } from '@/lib/api'
+import {
+  assertImageFileWithinUploadLimit,
+  getMaxImageUploadLabel,
+  uploadFileViaUploadApi,
+} from '@/lib/gallery-remote-upload'
 import { toast } from 'react-hot-toast'
 
 /** Matches `server/models/Property.js` and website `FeaturedProperties` / `/projects`. */
@@ -53,13 +58,6 @@ const emptyForm: PropertyFormState = {
   galleryUrls: '',
 }
 
-function resolvePropertyImageUrl(pathOrUrl: string): string {
-  if (!pathOrUrl) return ''
-  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl
-  const path = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`
-  return `${API_SERVER_ORIGIN}${path}`
-}
-
 function propertyId(p: { _id?: string; id?: string }) {
   return p._id ?? p.id ?? ''
 }
@@ -74,6 +72,34 @@ export default function PropertiesPage() {
   const [galleryFiles, setGalleryFiles] = useState<File[]>([])
   const primaryInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
+  const [primaryObjectUrl, setPrimaryObjectUrl] = useState<string | null>(null)
+  const [galleryObjectUrls, setGalleryObjectUrls] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!primaryFile) {
+      setPrimaryObjectUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(primaryFile)
+    setPrimaryObjectUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [primaryFile])
+
+  useEffect(() => {
+    const urls = galleryFiles.map((f) => URL.createObjectURL(f))
+    setGalleryObjectUrls(urls)
+    return () => urls.forEach((u) => URL.revokeObjectURL(u))
+  }, [galleryFiles])
+
+  const primaryPreviewSrc = primaryObjectUrl || resolveDashboardMediaUrl(form.primaryImageUrl.trim())
+  const primaryUrlDisplay = primaryFile
+    ? `Pending upload: ${primaryFile.name}`
+    : form.primaryImageUrl.trim() || '—'
+
+  const galleryUrlLines = useMemo(
+    () => form.galleryUrls.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean),
+    [form.galleryUrls],
+  )
 
   const { data: properties, refetch } = useQuery('properties', async () => {
     const response = await api.get('/properties')
@@ -126,82 +152,49 @@ export default function PropertiesPage() {
     setShowForm(true)
   }
 
-  const buildJsonPayload = () => {
-    const priceTrim = form.price.trim()
-    return {
-      title: form.title.trim(),
-      description: form.description.trim(),
-      location: form.location.trim(),
-      marla: form.marla.trim(),
-      type: form.type || 'residential',
-      status: form.status || 'available',
-      featured: form.featured,
-      sortOrder: form.sortOrder.trim() === '' ? 0 : Number(form.sortOrder),
-      price: priceTrim === '' ? null : Number(priceTrim),
-      primaryImage: form.primaryImageUrl.trim(),
-      galleryUrls: form.galleryUrls,
-    }
-  }
-
-  const appendFormFields = (fd: FormData) => {
-    const p = buildJsonPayload()
-    fd.append('title', p.title)
-    fd.append('description', p.description)
-    fd.append('location', p.location)
-    fd.append('marla', p.marla)
-    fd.append('type', p.type)
-    fd.append('status', p.status)
-    fd.append('featured', p.featured ? 'true' : 'false')
-    fd.append('sortOrder', String(p.sortOrder))
-    if (p.price != null && !Number.isNaN(p.price)) {
-      fd.append('price', String(p.price))
-    }
-    if (p.primaryImage && !primaryFile) {
-      fd.append('primaryImage', p.primaryImage)
-    }
-    if (form.galleryUrls.trim()) {
-      fd.append('galleryUrls', form.galleryUrls)
-    }
-    if (primaryFile) {
-      fd.append('primaryImage', primaryFile)
-    }
-    galleryFiles.forEach((file) => fd.append('gallery', file))
-  }
-
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true)
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
-      const hasFiles = Boolean(primaryFile || galleryFiles.length)
       const id = editingProperty ? propertyId(editingProperty as { _id?: string; id?: string }) : ''
 
-      if (hasFiles) {
-        const fd = new FormData()
-        appendFormFields(fd)
-        const url = editingProperty
-          ? `${API_AXIOS_BASE}/properties/${id}`
-          : `${API_AXIOS_BASE}/properties`
-        const res = await fetch(url, {
-          method: editingProperty ? 'PUT' : 'POST',
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          body: fd,
-        })
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error((err as { error?: string }).error || res.statusText)
-        }
-        toast.success(editingProperty ? 'Property updated successfully' : 'Property created successfully')
+      let primaryImage = form.primaryImageUrl.trim()
+      if (primaryFile) {
+        primaryImage = await uploadFileViaUploadApi(primaryFile)
+      }
+
+      const existingGalleryLines = form.galleryUrls
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const uploadedGallery: string[] = []
+      for (const file of galleryFiles) {
+        uploadedGallery.push(await uploadFileViaUploadApi(file))
+      }
+      const galleryUrls = [...existingGalleryLines, ...uploadedGallery].join('\n')
+
+      const priceTrim = form.price.trim()
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        location: form.location.trim(),
+        marla: form.marla.trim(),
+        type: form.type || 'residential',
+        status: form.status || 'available',
+        featured: form.featured,
+        sortOrder: form.sortOrder.trim() === '' ? 0 : Number(form.sortOrder),
+        price: priceTrim === '' ? null : Number(priceTrim),
+        primaryImage,
+        galleryUrls,
+      }
+
+      if (editingProperty && id) {
+        await api.put(`/properties/${id}`, payload)
+        toast.success('Property updated successfully')
       } else {
-        const payload = buildJsonPayload()
-        if (editingProperty && id) {
-          await api.put(`/properties/${id}`, payload)
-          toast.success('Property updated successfully')
-        } else {
-          await api.post('/properties', payload)
-          toast.success('Property created successfully')
-        }
+        await api.post('/properties', payload)
+        toast.success('Property created successfully')
       }
 
       setShowForm(false)
@@ -209,8 +202,9 @@ export default function PropertiesPage() {
       setForm(emptyForm)
       resetFiles()
       refetch()
-    } catch {
-      toast.error('Failed to save property')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save property'
+      toast.error(message)
     } finally {
       setSaving(false)
     }
@@ -355,9 +349,50 @@ export default function PropertiesPage() {
                     type="file"
                     accept="image/*"
                     className="cursor-pointer"
-                    onChange={(e) => setPrimaryFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null
+                      if (f) {
+                        try {
+                          assertImageFileWithinUploadLimit(f)
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : 'File too large')
+                          e.target.value = ''
+                          setPrimaryFile(null)
+                          return
+                        }
+                      }
+                      setPrimaryFile(f)
+                    }}
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Files are POSTed to your upload API first; the returned URL is sent to the estate API (
+                    <code className="text-[11px]">NEXT_PUBLIC_UPLOAD_API_URL</code>). Max{' '}
+                    {getMaxImageUploadLabel()} per file.
+                  </p>
                 </div>
+                {(primaryPreviewSrc || primaryUrlDisplay !== '—') && (
+                  <div className="md:col-span-2 rounded-lg border border-input bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">Primary image preview</p>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      {primaryPreviewSrc ? (
+                        <div className="shrink-0 w-full sm:w-44 h-32 rounded-md overflow-hidden bg-gray-200 border border-gray-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={primaryPreviewSrc}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : null}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-xs text-muted-foreground">URL</p>
+                        <p className="text-xs break-all font-mono bg-background border rounded px-2 py-1.5 text-gray-800">
+                          {primaryUrlDisplay}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="md:col-span-2">
                   <Label htmlFor="galleryUrls">Extra image URLs (one per line)</Label>
                   <textarea
@@ -377,9 +412,65 @@ export default function PropertiesPage() {
                     accept="image/*"
                     multiple
                     className="cursor-pointer"
-                    onChange={(e) => setGalleryFiles(e.target.files ? Array.from(e.target.files) : [])}
+                    onChange={(e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : []
+                      try {
+                        for (const file of files) assertImageFileWithinUploadLimit(file)
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'File too large')
+                        e.target.value = ''
+                        setGalleryFiles([])
+                        return
+                      }
+                      setGalleryFiles(files)
+                    }}
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Each file is uploaded via the same upload API. Max {getMaxImageUploadLabel()} per file.
+                  </p>
                 </div>
+                {(galleryUrlLines.length > 0 || galleryFiles.length > 0) && (
+                  <div className="md:col-span-2 rounded-lg border border-input bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">Gallery preview</p>
+                    <div className="flex flex-wrap gap-4">
+                      {galleryUrlLines.map((u, i) => (
+                        <div key={`url-${i}-${u.slice(0, 24)}`} className="w-[7.5rem]">
+                          <div className="aspect-video rounded-md border border-gray-200 overflow-hidden bg-gray-100">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={resolveDashboardMediaUrl(u)}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src =
+                                  'data:image/svg+xml,' +
+                                  encodeURIComponent(
+                                    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="68"><rect fill="#e5e7eb" width="120" height="68"/><text x="60" y="38" text-anchor="middle" fill="#9ca3af" font-size="10">No preview</text></svg>',
+                                  )
+                              }}
+                            />
+                          </div>
+                          <p className="text-[10px] mt-1 break-all font-mono text-gray-700 line-clamp-3" title={u}>
+                            {u}
+                          </p>
+                        </div>
+                      ))}
+                      {galleryFiles.map((f, i) => (
+                        <div key={`file-${i}-${f.name}`} className="w-[7.5rem]">
+                          <div className="aspect-video rounded-md border border-gray-200 overflow-hidden bg-gray-100">
+                            {galleryObjectUrls[i] ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={galleryObjectUrls[i]} alt="" className="w-full h-full object-cover" />
+                            ) : null}
+                          </div>
+                          <p className="text-[10px] mt-1 break-all text-gray-700 line-clamp-2" title={f.name}>
+                            {f.name}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center space-x-2 md:col-span-2">
                   <input
                     id="featured"
@@ -447,7 +538,8 @@ export default function PropertiesPage() {
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filteredProperties.map((property: Record<string, unknown>) => {
               const pid = propertyId(property as { _id?: string; id?: string })
-              const img = resolvePropertyImageUrl(String(property.primaryImage ?? ''))
+              const img = resolveDashboardMediaUrl(String(property.primaryImage ?? ''))
+              const rawPrimary = String(property.primaryImage ?? '')
               const priceVal = property.price
               const priceLabel =
                 priceVal != null && priceVal !== ''
@@ -465,6 +557,14 @@ export default function PropertiesPage() {
                       No image
                     </div>
                   )}
+                  {rawPrimary ? (
+                    <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/80">
+                      <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Image URL</p>
+                      <p className="text-[11px] font-mono text-gray-600 break-all line-clamp-2" title={rawPrimary}>
+                        {rawPrimary}
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="p-4">
                     <div className="flex justify-between items-start mb-2 gap-2">
                       <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">{String(property.title ?? '')}</h3>

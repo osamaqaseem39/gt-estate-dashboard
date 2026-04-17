@@ -3,26 +3,12 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { 
-  Home, 
-  Building2, 
-  Newspaper, 
-  Mail, 
-  Image, 
-  Users, 
-  Settings,
-  FileText
-} from 'lucide-react'
+import { Home, Building2, Image } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home },
   { name: 'Properties / projects', href: '/dashboard/properties', icon: Building2 },
-  { name: 'News', href: '/dashboard/news', icon: Newspaper },
-  { name: 'Inquiries', href: '/dashboard/inquiries', icon: Mail },
   { name: 'Gallery', href: '/dashboard/gallery', icon: Image },
-  { name: 'Pages', href: '/dashboard/pages', icon: FileText },
-  { name: 'Users', href: '/dashboard/users', icon: Users },
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ]
 
 export function Sidebar() {

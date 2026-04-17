@@ -22,6 +22,15 @@ const { axiosBase, serverOrigin } = resolveApiBase()
 /** Use in user-facing copy (e.g. “backend running at …”). */
 export const API_SERVER_ORIGIN = serverOrigin
 
+/** Absolute URL for images stored as `/uploads/...` or full https URLs (dashboard previews & lists). */
+export function resolveDashboardMediaUrl(pathOrUrl: string): string {
+  if (!pathOrUrl) return ''
+  const t = pathOrUrl.trim()
+  if (t.startsWith('http://') || t.startsWith('https://')) return t
+  const path = t.startsWith('/') ? t : `/${t}`
+  return `${serverOrigin}${path}`
+}
+
 /** Same base URL as the axios client (`…/api`). Use with `fetch` + FormData so the browser sets multipart boundaries. */
 export const API_AXIOS_BASE = axiosBase
 
