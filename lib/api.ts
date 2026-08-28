@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 /** Server origin (no `/api`); matches `NEXT_PUBLIC_API_URL` after normalizing. */
-const DEFAULT_ORIGIN = 'https://gt-estate-server-zhly.vercel.app'
+const DEFAULT_ORIGIN = 'https://estate-server-nine.vercel.app'
 
 function resolveApiBase(): { axiosBase: string; serverOrigin: string } {
   const trimmed = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_ORIGIN).replace(/\/$/, '')

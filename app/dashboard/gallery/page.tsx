@@ -30,6 +30,7 @@ type GalleryShape = 'portrait' | 'landscape'
 
 type GalleryFormState = {
   title: string
+  titleTag: string
   description: string
   imageUrl: string
   category: string
@@ -39,6 +40,7 @@ type GalleryFormState = {
 
 const emptyGalleryForm: GalleryFormState = {
   title: '',
+  titleTag: '',
   description: '',
   imageUrl: '',
   category: '',
@@ -115,6 +117,7 @@ export default function GalleryPage() {
     setEditingItem(item)
     setForm({
       title: item.alt ?? item.title ?? '',
+      titleTag: item.titleTag ?? '',
       description: item.description ?? '',
       imageUrl: item.imageUrl ?? '',
       category: item.category ?? '',
@@ -133,6 +136,7 @@ export default function GalleryPage() {
     const alt = form.description?.trim()
       ? `${form.title.trim()}\n${form.description.trim()}`
       : form.title.trim()
+    const titleTag = form.titleTag.trim() || undefined
     const category = form.category.trim() || 'general'
     const published = form.featured
 
@@ -143,6 +147,7 @@ export default function GalleryPage() {
         if (editingItem && itemId) {
           await api.put(`/gallery/items/${itemId}`, {
             alt,
+            titleTag,
             category,
             published,
             shape: form.shape,
@@ -152,6 +157,7 @@ export default function GalleryPage() {
         } else {
           await api.post('/gallery', {
             alt,
+            titleTag,
             imageUrl,
             category,
             published,
@@ -165,8 +171,9 @@ export default function GalleryPage() {
           return
         }
         if (editingItem) {
-          const payload: Record<string, string | boolean> = {
+          const payload: Record<string, string | boolean | undefined> = {
             alt,
+            titleTag,
             category,
             published,
             shape: form.shape,
@@ -177,6 +184,7 @@ export default function GalleryPage() {
         } else {
           await api.post('/gallery', {
             alt,
+            titleTag,
             imageUrl: form.imageUrl.trim(),
             category,
             published,
@@ -243,12 +251,21 @@ export default function GalleryPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="title">Title</Label>
+                  <Label htmlFor="title">Title (alt text)</Label>
                   <Input
                     id="title"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="titleTag">Title tag</Label>
+                  <Input
+                    id="titleTag"
+                    value={form.titleTag}
+                    onChange={(e) => setForm({ ...form, titleTag: e.target.value })}
+                    placeholder="HTML title attribute (tooltip on hover)"
                   />
                 </div>
                 <div>

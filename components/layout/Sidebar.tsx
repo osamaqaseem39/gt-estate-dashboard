@@ -3,12 +3,44 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Home, Building2, Image } from 'lucide-react'
+import { Home, Building2, Image, Newspaper, Mail, Star, Users, Info, FileText, type LucideIcon } from 'lucide-react'
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: Home },
-  { name: 'Properties / projects', href: '/dashboard/properties', icon: Building2 },
-  { name: 'Gallery', href: '/dashboard/gallery', icon: Image },
+interface NavItem {
+  name: string
+  href: string
+  icon: LucideIcon
+}
+
+interface NavGroup {
+  label: string | null
+  items: NavItem[]
+}
+
+/**
+ * Grouped so future sections (Events, Blog, Loan Applications, Payment Plans, ...)
+ * can slot into an existing group instead of growing one flat list.
+ */
+const navigation: NavGroup[] = [
+  {
+    label: null,
+    items: [{ name: 'Dashboard', href: '/dashboard', icon: Home }],
+  },
+  {
+    label: 'Content',
+    items: [
+      { name: 'Properties / Projects', href: '/dashboard/properties', icon: Building2 },
+      { name: 'Gallery', href: '/dashboard/gallery', icon: Image },
+      { name: 'News', href: '/dashboard/news', icon: Newspaper },
+      { name: 'Reviews', href: '/dashboard/reviews', icon: Star },
+      { name: 'Team', href: '/dashboard/team', icon: Users },
+      { name: 'What We Do', href: '/dashboard/what-we-do', icon: Info },
+      { name: 'Pages / SEO', href: '/dashboard/pages', icon: FileText },
+    ],
+  },
+  {
+    label: 'Leads',
+    items: [{ name: 'Inquiries', href: '/dashboard/inquiries', icon: Mail }],
+  },
 ]
 
 export function Sidebar() {
@@ -21,36 +53,43 @@ export function Sidebar() {
           <h1 className="text-xl font-bold text-gray-900">Real Estate</h1>
         </div>
         <nav className="flex flex-1 flex-col">
-          <ul role="list" className="flex flex-1 flex-col gap-y-7">
-            <li>
-              <ul role="list" className="-mx-2 space-y-1">
-                {navigation.map((item) => {
-                  const isActive = pathname === item.href
-                  return (
-                    <li key={item.name}>
-                      <Link
-                        href={item.href}
-                        className={cn(
-                          isActive
-                            ? 'bg-primary-50 text-primary-700'
-                            : 'text-gray-700 hover:text-primary-700 hover:bg-gray-50',
-                          'group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold'
-                        )}
-                      >
-                        <item.icon
+          <ul role="list" className="flex flex-1 flex-col gap-y-6">
+            {navigation.map((group, groupIdx) => (
+              <li key={group.label ?? `group-${groupIdx}`}>
+                {group.label && (
+                  <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    {group.label}
+                  </p>
+                )}
+                <ul role="list" className="-mx-2 space-y-1">
+                  {group.items.map((item) => {
+                    const isActive = pathname === item.href
+                    return (
+                      <li key={item.name}>
+                        <Link
+                          href={item.href}
                           className={cn(
-                            isActive ? 'text-primary-700' : 'text-gray-400 group-hover:text-primary-700',
-                            'h-6 w-6 shrink-0'
+                            isActive
+                              ? 'bg-primary-50 text-primary-700'
+                              : 'text-gray-700 hover:text-primary-700 hover:bg-gray-50',
+                            'group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold'
                           )}
-                          aria-hidden="true"
-                        />
-                        {item.name}
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ul>
-            </li>
+                        >
+                          <item.icon
+                            className={cn(
+                              isActive ? 'text-primary-700' : 'text-gray-400 group-hover:text-primary-700',
+                              'h-6 w-6 shrink-0'
+                            )}
+                            aria-hidden="true"
+                          />
+                          {item.name}
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
+            ))}
           </ul>
         </nav>
       </div>
