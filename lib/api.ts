@@ -3,17 +3,13 @@ import axios from 'axios'
 /** Server origin (no `/api`); matches `NEXT_PUBLIC_API_URL` after normalizing. */
 const DEFAULT_ORIGIN = 'https://estate-server-nine.vercel.app'
 
+/** gt-estate-server mounts controllers at root (no `setGlobalPrefix`), so the axios base is just the origin. */
 function resolveApiBase(): { axiosBase: string; serverOrigin: string } {
   const trimmed = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_ORIGIN).replace(/\/$/, '')
-  if (trimmed.toLowerCase().endsWith('/api')) {
-    return {
-      axiosBase: trimmed,
-      serverOrigin: trimmed.replace(/\/api$/i, '') || trimmed,
-    }
-  }
+  const serverOrigin = trimmed.replace(/\/api$/i, '') || trimmed
   return {
-    axiosBase: `${trimmed}/api`,
-    serverOrigin: trimmed,
+    axiosBase: serverOrigin,
+    serverOrigin,
   }
 }
 
@@ -31,7 +27,7 @@ export function resolveDashboardMediaUrl(pathOrUrl: string): string {
   return `${serverOrigin}${path}`
 }
 
-/** Same base URL as the axios client (`…/api`). Use with `fetch` + FormData so the browser sets multipart boundaries. */
+/** Same base URL as the axios client. Use with `fetch` + FormData so the browser sets multipart boundaries. */
 export const API_AXIOS_BASE = axiosBase
 
 export const api = axios.create({
