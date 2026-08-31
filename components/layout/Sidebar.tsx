@@ -3,7 +3,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Home, Building2, Image, Newspaper, Mail, Star, Users, Info, FileText, Briefcase, type LucideIcon } from 'lucide-react'
+import {
+  Home,
+  Building2,
+  Image,
+  Newspaper,
+  Mail,
+  Star,
+  Users,
+  Info,
+  FileText,
+  Briefcase,
+  Calendar,
+  CreditCard,
+  Landmark,
+  type LucideIcon,
+} from 'lucide-react'
 
 interface NavItem {
   name: string
@@ -30,7 +45,9 @@ const navigation: NavGroup[] = [
     items: [
       { name: 'Properties / Projects', href: '/dashboard/properties', icon: Building2 },
       { name: 'Gallery', href: '/dashboard/gallery', icon: Image },
-      { name: 'News', href: '/dashboard/news', icon: Newspaper },
+      { name: 'Events', href: '/dashboard/events', icon: Calendar },
+      { name: 'Blog', href: '/dashboard/news', icon: Newspaper },
+      { name: 'Payment Plans', href: '/dashboard/payment-plans', icon: CreditCard },
       { name: 'Reviews', href: '/dashboard/reviews', icon: Star },
       { name: 'Team', href: '/dashboard/team', icon: Users },
       { name: 'What We Do', href: '/dashboard/what-we-do', icon: Info },
@@ -41,6 +58,7 @@ const navigation: NavGroup[] = [
     label: 'Leads',
     items: [
       { name: 'Inquiries', href: '/dashboard/inquiries', icon: Mail },
+      { name: 'Loan Applications', href: '/dashboard/loan-applications', icon: Landmark },
       { name: 'Careers', href: '/dashboard/careers', icon: Briefcase },
     ],
   },

@@ -20,6 +20,7 @@ const PROPERTY_TYPES = [
   { value: 'residential', label: 'Residential' },
   { value: 'commercial', label: 'Commercial' },
   { value: 'mixed', label: 'Mixed' },
+  { value: 'townhouse', label: 'Townhouse' },
   { value: 'other', label: 'Other' },
 ] as const
 
@@ -38,6 +39,7 @@ type GalleryEntry = {
 
 type PropertyFormState = {
   title: string
+  slug: string
   description: string
   price: string
   location: string
@@ -48,10 +50,13 @@ type PropertyFormState = {
   sortOrder: string
   primaryImageUrl: string
   gallery: GalleryEntry[]
+  inventory: string
+  paymentPlan: string
 }
 
 const emptyForm: PropertyFormState = {
   title: '',
+  slug: '',
   description: '',
   price: '',
   location: '',
@@ -62,13 +67,14 @@ const emptyForm: PropertyFormState = {
   sortOrder: '0',
   primaryImageUrl: '',
   gallery: [],
+  inventory: '[]',
+  paymentPlan: JSON.stringify({ enabled: false, title: 'Payment Plan', rows: [] }, null, 2),
 }
 
 function propertyId(p: { _id?: string; id?: string }) {
   return p._id ?? p.id ?? ''
 }
 
-/** Property.gallery entries are either legacy plain URL strings or { url, alt, title } objects. */
 function normalizeGalleryEntry(item: unknown): GalleryEntry | null {
   if (item == null) return null
   if (typeof item === 'string') {
@@ -82,6 +88,28 @@ function normalizeGalleryEntry(item: unknown): GalleryEntry | null {
     return { url, alt: String(o.alt ?? ''), title: String(o.title ?? '') }
   }
   return null
+}
+
+function stringifyJsonField(value: unknown, fallback: string): string {
+  if (value == null) return fallback
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return fallback
+  }
+}
+
+function parseJsonField<T>(raw: string, fieldLabel: string, emptyDefault?: T): T {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    if (emptyDefault !== undefined) return emptyDefault
+    throw new Error(`${fieldLabel} is required`)
+  }
+  try {
+    return JSON.parse(trimmed) as T
+  } catch {
+    throw new Error(`${fieldLabel} must be valid JSON`)
+  }
 }
 
 export default function PropertiesPage() {
@@ -150,6 +178,7 @@ export default function PropertiesPage() {
       : []
     setForm({
       title: String(property.title ?? ''),
+      slug: String(property.slug ?? ''),
       description: String(property.description ?? ''),
       price: property.price != null && property.price !== '' ? String(property.price) : '',
       location: String(property.location ?? ''),
@@ -160,6 +189,11 @@ export default function PropertiesPage() {
       sortOrder: property.sortOrder != null ? String(property.sortOrder) : '0',
       primaryImageUrl: String(property.primaryImage ?? ''),
       gallery,
+      inventory: stringifyJsonField(property.inventory, '[]'),
+      paymentPlan: stringifyJsonField(
+        property.paymentPlan,
+        JSON.stringify({ enabled: false, title: 'Payment Plan', rows: [] }, null, 2),
+      ),
     })
     resetFiles()
     setShowForm(true)
@@ -226,8 +260,24 @@ export default function PropertiesPage() {
         .filter((g) => g.url)
 
       const priceTrim = form.price.trim()
+      let inventory: unknown
+      let paymentPlan: unknown
+      try {
+        inventory = parseJsonField(form.inventory, 'Inventory', [])
+        paymentPlan = parseJsonField(form.paymentPlan, 'Payment plan', {
+          enabled: false,
+          title: 'Payment Plan',
+          rows: [],
+        })
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Invalid JSON in inventory or payment plan')
+        setSaving(false)
+        return
+      }
+
       const payload = {
         title: form.title.trim(),
+        slug: form.slug.trim() || undefined,
         description: form.description.trim(),
         location: form.location.trim(),
         marla: form.marla.trim(),
@@ -238,6 +288,8 @@ export default function PropertiesPage() {
         price: priceTrim === '' ? null : Number(priceTrim),
         primaryImage,
         gallery,
+        inventory,
+        paymentPlan,
       }
 
       if (editingProperty && id) {
@@ -306,6 +358,18 @@ export default function PropertiesPage() {
                     required
                     placeholder="e.g. Sialkot — 5 Marla Residential"
                   />
+                </div>
+                <div>
+                  <Label htmlFor="slug">Slug</Label>
+                  <Input
+                    id="slug"
+                    value={form.slug}
+                    onChange={(e) => setForm({ ...form, slug: e.target.value })}
+                    placeholder="e.g. etihad-town-sialkot"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Optional URL slug for the project detail page.
+                  </p>
                 </div>
                 <div>
                   <Label htmlFor="location">Location</Label>
@@ -551,6 +615,32 @@ export default function PropertiesPage() {
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                 />
+              </div>
+              <div>
+                <Label htmlFor="inventory">Inventory (JSON)</Label>
+                <textarea
+                  id="inventory"
+                  className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  rows={6}
+                  value={form.inventory}
+                  onChange={(e) => setForm({ ...form, inventory: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Array of {'{ category, label, size, price, status, notes }'}.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="paymentPlan">Payment plan (JSON)</Label>
+                <textarea
+                  id="paymentPlan"
+                  className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  rows={6}
+                  value={form.paymentPlan}
+                  onChange={(e) => setForm({ ...form, paymentPlan: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {'{ enabled, title, rows: [{ milestone, percentage, amount, dueOn, notes }] }'}
+                </p>
               </div>
               <div className="flex justify-end space-x-2">
                 <Button

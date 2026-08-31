@@ -258,7 +258,7 @@ export default function GalleryPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="title">Title (alt text)</Label>
+                  <Label htmlFor="title">Alt text</Label>
                   <Input
                     id="title"
                     value={form.title}
@@ -267,12 +267,12 @@ export default function GalleryPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="titleTag">Title tag</Label>
+                  <Label htmlFor="titleTag">Image title</Label>
                   <Input
                     id="titleTag"
                     value={form.titleTag}
                     onChange={(e) => setForm({ ...form, titleTag: e.target.value })}
-                    placeholder="HTML title attribute (tooltip on hover)"
+                    placeholder="Tooltip shown on hover"
                   />
                 </div>
                 <div>
