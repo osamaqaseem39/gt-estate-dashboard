@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const DEFAULT_API_ORIGIN = 'https://gt-estate-server.vercel.app'
+const DEFAULT_API_ORIGIN = 'https://estate-server-nine.vercel.app'
 const DEFAULT_MEDIA_ORIGIN = 'https://gt.osamaqaseem.online'
 
 function resolveApiBase(): string {
