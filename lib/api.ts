@@ -1,26 +1,21 @@
 import axios from 'axios'
 
-/** Server origin (no `/api`); matches `NEXT_PUBLIC_API_URL` after normalizing. */
-const DEFAULT_ORIGIN = 'https://gt-estate-server-zhly.vercel.app'
+const DEFAULT_API_ORIGIN = 'https://gt-estate-server.vercel.app'
+const DEFAULT_MEDIA_ORIGIN = 'https://gt.osamaqaseem.online'
 
-function resolveApiBase(): { axiosBase: string; serverOrigin: string } {
-  const trimmed = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_ORIGIN).replace(/\/$/, '')
-  if (trimmed.toLowerCase().endsWith('/api')) {
-    return {
-      axiosBase: trimmed,
-      serverOrigin: trimmed.replace(/\/api$/i, '') || trimmed,
-    }
-  }
-  return {
-    axiosBase: `${trimmed}/api`,
-    serverOrigin: trimmed,
-  }
+function resolveApiBase(): string {
+  return (process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_ORIGIN).replace(/\/$/, '')
 }
 
-const { axiosBase, serverOrigin } = resolveApiBase()
+function resolveMediaBase(): string {
+  return (process.env.NEXT_PUBLIC_MEDIA_URL || DEFAULT_MEDIA_ORIGIN).replace(/\/$/, '')
+}
+
+const axiosBase = resolveApiBase()
+const mediaBase = resolveMediaBase()
 
 /** Use in user-facing copy (e.g. “backend running at …”). */
-export const API_SERVER_ORIGIN = serverOrigin
+export const API_SERVER_ORIGIN = mediaBase
 
 /** Absolute URL for images stored as `/uploads/...` or full https URLs (dashboard previews & lists). */
 export function resolveDashboardMediaUrl(pathOrUrl: string): string {
@@ -28,7 +23,7 @@ export function resolveDashboardMediaUrl(pathOrUrl: string): string {
   const t = pathOrUrl.trim()
   if (t.startsWith('http://') || t.startsWith('https://')) return t
   const path = t.startsWith('/') ? t : `/${t}`
-  return `${serverOrigin}${path}`
+  return `${mediaBase}${path}`
 }
 
 /** Same base URL as the axios client (`…/api`). Use with `fetch` + FormData so the browser sets multipart boundaries. */

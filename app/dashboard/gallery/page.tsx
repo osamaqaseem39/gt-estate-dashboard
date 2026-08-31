@@ -35,6 +35,7 @@ type GalleryFormState = {
   category: string
   featured: boolean
   shape: GalleryShape
+  display: 'grid' | 'full-original'
 }
 
 const emptyGalleryForm: GalleryFormState = {
@@ -44,6 +45,7 @@ const emptyGalleryForm: GalleryFormState = {
   category: '',
   featured: false,
   shape: 'landscape',
+  display: 'grid',
 }
 
 function itemShapeFromApi(item: { shape?: string }): GalleryShape {
@@ -120,6 +122,7 @@ export default function GalleryPage() {
       category: item.category ?? '',
       featured: Boolean(item.published ?? item.featured),
       shape: itemShapeFromApi(item),
+      display: item.display === 'full-original' ? 'full-original' : 'grid',
     })
     setPendingFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -146,16 +149,18 @@ export default function GalleryPage() {
             category,
             published,
             shape: form.shape,
+            display: form.display,
             imageUrl,
           })
           toast.success('Gallery item updated successfully')
         } else {
           await api.post('/gallery', {
             alt,
-            imageUrl,
+             imageUrl,
             category,
             published,
             shape: form.shape,
+            display: form.display,
           })
           toast.success('Gallery item created successfully')
         }
@@ -170,6 +175,7 @@ export default function GalleryPage() {
             category,
             published,
             shape: form.shape,
+            display: form.display,
           }
           if (form.imageUrl.trim()) payload.imageUrl = form.imageUrl.trim()
           await api.put(`/gallery/items/${editingItem._id ?? editingItem.id}`, payload)
@@ -177,10 +183,11 @@ export default function GalleryPage() {
         } else {
           await api.post('/gallery', {
             alt,
-            imageUrl: form.imageUrl.trim(),
+             imageUrl: form.imageUrl.trim(),
             category,
             published,
             shape: form.shape,
+            display: form.display,
           })
           toast.success('Gallery item created successfully')
         }
@@ -381,6 +388,36 @@ export default function GalleryPage() {
                     >
                       <RectangleHorizontal className="h-4 w-4" />
                       Landscape
+                    </button>
+                  </div>
+                </div>
+                <div className="md:col-span-2 space-y-2">
+                  <Label>Display Style</Label>
+                  <p className="text-xs text-gray-500">
+                    Control how this item is sized in the gallery grid. Full Width occupies the whole row.
+                  </p>
+                  <div className="inline-flex rounded-lg border border-input p-1 bg-muted/30">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, display: 'grid' })}
+                      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        form.display === 'grid'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Grid
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, display: 'full-original' })}
+                      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        form.display === 'full-original'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Full Width
                     </button>
                   </div>
                 </div>

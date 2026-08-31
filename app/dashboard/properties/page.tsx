@@ -1,12 +1,12 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useQuery } from 'react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Search, Edit, Trash2, Eye } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Eye, X } from 'lucide-react'
 import { api, resolveDashboardMediaUrl } from '@/lib/api'
 import {
   assertImageFileWithinUploadLimit,
@@ -30,6 +30,12 @@ const PROPERTY_STATUSES = [
   { value: 'coming_soon', label: 'Coming soon' },
 ] as const
 
+type GalleryEntry = {
+  url: string
+  alt: string
+  title: string
+}
+
 type PropertyFormState = {
   title: string
   description: string
@@ -41,7 +47,7 @@ type PropertyFormState = {
   featured: boolean
   sortOrder: string
   primaryImageUrl: string
-  galleryUrls: string
+  gallery: GalleryEntry[]
 }
 
 const emptyForm: PropertyFormState = {
@@ -55,11 +61,27 @@ const emptyForm: PropertyFormState = {
   featured: false,
   sortOrder: '0',
   primaryImageUrl: '',
-  galleryUrls: '',
+  gallery: [],
 }
 
 function propertyId(p: { _id?: string; id?: string }) {
   return p._id ?? p.id ?? ''
+}
+
+/** Property.gallery entries are either legacy plain URL strings or { url, alt, title } objects. */
+function normalizeGalleryEntry(item: unknown): GalleryEntry | null {
+  if (item == null) return null
+  if (typeof item === 'string') {
+    const url = item.trim()
+    return url ? { url, alt: '', title: '' } : null
+  }
+  if (typeof item === 'object') {
+    const o = item as { url?: string; imageUrl?: string; alt?: string; title?: string }
+    const url = String(o.url ?? o.imageUrl ?? '').trim()
+    if (!url) return null
+    return { url, alt: String(o.alt ?? ''), title: String(o.title ?? '') }
+  }
+  return null
 }
 
 export default function PropertiesPage() {
@@ -69,11 +91,11 @@ export default function PropertiesPage() {
   const [form, setForm] = useState<PropertyFormState>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [primaryFile, setPrimaryFile] = useState<File | null>(null)
-  const [galleryFiles, setGalleryFiles] = useState<File[]>([])
+  const [galleryUploading, setGalleryUploading] = useState(false)
+  const [quickAddUrl, setQuickAddUrl] = useState('')
   const primaryInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
   const [primaryObjectUrl, setPrimaryObjectUrl] = useState<string | null>(null)
-  const [galleryObjectUrls, setGalleryObjectUrls] = useState<string[]>([])
 
   useEffect(() => {
     if (!primaryFile) {
@@ -85,21 +107,10 @@ export default function PropertiesPage() {
     return () => URL.revokeObjectURL(url)
   }, [primaryFile])
 
-  useEffect(() => {
-    const urls = galleryFiles.map((f) => URL.createObjectURL(f))
-    setGalleryObjectUrls(urls)
-    return () => urls.forEach((u) => URL.revokeObjectURL(u))
-  }, [galleryFiles])
-
   const primaryPreviewSrc = primaryObjectUrl || resolveDashboardMediaUrl(form.primaryImageUrl.trim())
   const primaryUrlDisplay = primaryFile
     ? `Pending upload: ${primaryFile.name}`
     : form.primaryImageUrl.trim() || '—'
-
-  const galleryUrlLines = useMemo(
-    () => form.galleryUrls.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean),
-    [form.galleryUrls],
-  )
 
   const { data: properties, refetch } = useQuery('properties', async () => {
     const response = await api.get('/properties')
@@ -120,7 +131,7 @@ export default function PropertiesPage() {
 
   const resetFiles = () => {
     setPrimaryFile(null)
-    setGalleryFiles([])
+    setQuickAddUrl('')
     if (primaryInputRef.current) primaryInputRef.current.value = ''
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
@@ -134,7 +145,9 @@ export default function PropertiesPage() {
 
   const startEdit = (property: Record<string, unknown>) => {
     setEditingProperty(property)
-    const gallery = Array.isArray(property.gallery) ? (property.gallery as string[]) : []
+    const gallery = Array.isArray(property.gallery)
+      ? (property.gallery as unknown[]).map(normalizeGalleryEntry).filter((g): g is GalleryEntry => g !== null)
+      : []
     setForm({
       title: String(property.title ?? ''),
       description: String(property.description ?? ''),
@@ -146,10 +159,54 @@ export default function PropertiesPage() {
       featured: Boolean(property.featured),
       sortOrder: property.sortOrder != null ? String(property.sortOrder) : '0',
       primaryImageUrl: String(property.primaryImage ?? ''),
-      galleryUrls: gallery.join('\n'),
+      gallery,
     })
     resetFiles()
     setShowForm(true)
+  }
+
+  const addGalleryEntry = (entry: GalleryEntry) => {
+    setForm((prev) => ({ ...prev, gallery: [...prev.gallery, entry] }))
+  }
+
+  const updateGalleryEntry = (index: number, patch: Partial<GalleryEntry>) => {
+    setForm((prev) => ({
+      ...prev,
+      gallery: prev.gallery.map((g, i) => (i === index ? { ...g, ...patch } : g)),
+    }))
+  }
+
+  const removeGalleryEntry = (index: number) => {
+    setForm((prev) => ({ ...prev, gallery: prev.gallery.filter((_, i) => i !== index) }))
+  }
+
+  const handleQuickAddUrl = () => {
+    const url = quickAddUrl.trim()
+    if (!url) return
+    addGalleryEntry({ url, alt: '', title: '' })
+    setQuickAddUrl('')
+  }
+
+  const handleGalleryFilesSelected = async (files: File[]) => {
+    try {
+      for (const file of files) assertImageFileWithinUploadLimit(file)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'File too large')
+      if (galleryInputRef.current) galleryInputRef.current.value = ''
+      return
+    }
+    setGalleryUploading(true)
+    try {
+      for (const file of files) {
+        const url = await uploadFileViaUploadApi(file)
+        addGalleryEntry({ url, alt: '', title: '' })
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload gallery image')
+    } finally {
+      setGalleryUploading(false)
+      if (galleryInputRef.current) galleryInputRef.current.value = ''
+    }
   }
 
   const handleSubmit = async (e: FormEvent) => {
@@ -164,15 +221,9 @@ export default function PropertiesPage() {
         primaryImage = await uploadFileViaUploadApi(primaryFile)
       }
 
-      const existingGalleryLines = form.galleryUrls
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-      const uploadedGallery: string[] = []
-      for (const file of galleryFiles) {
-        uploadedGallery.push(await uploadFileViaUploadApi(file))
-      }
-      const galleryUrls = [...existingGalleryLines, ...uploadedGallery].join('\n')
+      const gallery = form.gallery
+        .map((g) => ({ url: g.url.trim(), alt: g.alt.trim(), title: g.title.trim() }))
+        .filter((g) => g.url)
 
       const priceTrim = form.price.trim()
       const payload = {
@@ -186,7 +237,7 @@ export default function PropertiesPage() {
         sortOrder: form.sortOrder.trim() === '' ? 0 : Number(form.sortOrder),
         price: priceTrim === '' ? null : Number(priceTrim),
         primaryImage,
-        galleryUrls,
+        gallery,
       }
 
       if (editingProperty && id) {
@@ -393,52 +444,52 @@ export default function PropertiesPage() {
                     </div>
                   </div>
                 )}
-                <div className="md:col-span-2">
-                  <Label htmlFor="galleryUrls">Extra image URLs (one per line)</Label>
-                  <textarea
-                    id="galleryUrls"
-                    className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[88px]"
-                    value={form.galleryUrls}
-                    onChange={(e) => setForm({ ...form, galleryUrls: e.target.value })}
-                    placeholder="https://example.com/plot-a.jpg"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <Label htmlFor="galleryFiles">Or upload gallery images</Label>
-                  <Input
-                    id="galleryFiles"
-                    ref={galleryInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="cursor-pointer"
-                    onChange={(e) => {
-                      const files = e.target.files ? Array.from(e.target.files) : []
-                      try {
-                        for (const file of files) assertImageFileWithinUploadLimit(file)
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : 'File too large')
-                        e.target.value = ''
-                        setGalleryFiles([])
-                        return
-                      }
-                      setGalleryFiles(files)
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Each file is uploaded via the same upload API. Max {getMaxImageUploadLabel()} per file.
+                <div className="md:col-span-2 space-y-2">
+                  <Label>Gallery images</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Each image can have its own Alt text (accessibility / SEO) and Title. Upload files or paste a
+                    URL, then fill in Alt/Title per image below.
                   </p>
-                </div>
-                {(galleryUrlLines.length > 0 || galleryFiles.length > 0) && (
-                  <div className="md:col-span-2 rounded-lg border border-input bg-muted/30 p-3">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Gallery preview</p>
-                    <div className="flex flex-wrap gap-4">
-                      {galleryUrlLines.map((u, i) => (
-                        <div key={`url-${i}-${u.slice(0, 24)}`} className="w-[7.5rem]">
-                          <div className="aspect-video rounded-md border border-gray-200 overflow-hidden bg-gray-100">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      ref={galleryInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="cursor-pointer max-w-xs"
+                      disabled={galleryUploading}
+                      onChange={(e) => {
+                        const files = e.target.files ? Array.from(e.target.files) : []
+                        if (files.length) handleGalleryFilesSelected(files)
+                      }}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {galleryUploading ? 'Uploading…' : `Max ${getMaxImageUploadLabel()} per file`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      value={quickAddUrl}
+                      onChange={(e) => setQuickAddUrl(e.target.value)}
+                      placeholder="Or paste an image URL"
+                      className="max-w-xs"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={handleQuickAddUrl}>
+                      Add URL
+                    </Button>
+                  </div>
+
+                  {form.gallery.length > 0 && (
+                    <div className="space-y-3 mt-2">
+                      {form.gallery.map((entry, i) => (
+                        <div
+                          key={`${entry.url}-${i}`}
+                          className="flex flex-col sm:flex-row gap-3 rounded-lg border border-input bg-muted/30 p-3"
+                        >
+                          <div className="shrink-0 w-full sm:w-32 aspect-video rounded-md border border-gray-200 overflow-hidden bg-gray-100">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={resolveDashboardMediaUrl(u)}
+                              src={resolveDashboardMediaUrl(entry.url)}
                               alt=""
                               className="w-full h-full object-cover"
                               onError={(e) => {
@@ -450,27 +501,37 @@ export default function PropertiesPage() {
                               }}
                             />
                           </div>
-                          <p className="text-[10px] mt-1 break-all font-mono text-gray-700 line-clamp-3" title={u}>
-                            {u}
-                          </p>
-                        </div>
-                      ))}
-                      {galleryFiles.map((f, i) => (
-                        <div key={`file-${i}-${f.name}`} className="w-[7.5rem]">
-                          <div className="aspect-video rounded-md border border-gray-200 overflow-hidden bg-gray-100">
-                            {galleryObjectUrls[i] ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img src={galleryObjectUrls[i]} alt="" className="w-full h-full object-cover" />
-                            ) : null}
+                          <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <p
+                              className="sm:col-span-2 text-[11px] break-all font-mono text-gray-600"
+                              title={entry.url}
+                            >
+                              {entry.url}
+                            </p>
+                            <Input
+                              value={entry.alt}
+                              onChange={(e) => updateGalleryEntry(i, { alt: e.target.value })}
+                              placeholder="Alt text"
+                            />
+                            <Input
+                              value={entry.title}
+                              onChange={(e) => updateGalleryEntry(i, { title: e.target.value })}
+                              placeholder="Title"
+                            />
                           </div>
-                          <p className="text-[10px] mt-1 break-all text-gray-700 line-clamp-2" title={f.name}>
-                            {f.name}
-                          </p>
+                          <button
+                            type="button"
+                            onClick={() => removeGalleryEntry(i)}
+                            className="shrink-0 self-start rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                            aria-label="Remove image"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
                 <div className="flex items-center space-x-2 md:col-span-2">
                   <input
                     id="featured"
