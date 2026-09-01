@@ -3,31 +3,56 @@
 import { useQuery } from 'react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatsCard } from '@/components/dashboard/StatsCard'
-import { RecentInquiries } from '@/components/dashboard/RecentInquiries'
+import { RecentLeads, type RecentLead } from '@/components/dashboard/RecentLeads'
 import { PropertiesChart } from '@/components/dashboard/PropertiesChart'
 import { api } from '@/lib/api'
+import type { LoanApplication } from '@/lib/loan-applications'
 
 export default function DashboardPage() {
   const { data: stats } = useQuery('dashboard-stats', async () => {
-    const [properties, inquiries, news, gallery] = await Promise.all([
+    const [properties, inquiries, loanApplications, news, gallery] = await Promise.all([
       api.get('/properties').then(res => res.data),
       api.get('/inquiries').then(res => res.data),
+      api.get('/loan-applications').then(res => res.data).catch(() => []),
       api.get('/news').then(res => res.data),
       api.get('/gallery').then(res => res.data),
     ])
 
+    const newInquiries = inquiries.filter((i: { status: string }) => i.status === 'new').length
+    const newLoans = loanApplications.filter((l: LoanApplication) => l.status === 'new').length
+
     return {
       totalProperties: properties.length,
-      totalInquiries: inquiries.length,
-      newInquiries: inquiries.filter((i: any) => i.status === 'new').length,
+      totalInquiries: inquiries.length + loanApplications.length,
+      newInquiries: newInquiries + newLoans,
+      totalLoanApplications: loanApplications.length,
       totalNews: news.length,
       totalGallery: gallery.length,
     }
   })
 
-  const { data: recentInquiries } = useQuery('recent-inquiries', async () => {
-    const response = await api.get('/inquiries')
-    return response.data.slice(0, 5)
+  const { data: recentLeads } = useQuery('recent-leads', async () => {
+    const [inquiriesRes, loansRes] = await Promise.all([
+      api.get('/inquiries'),
+      api.get('/loan-applications').catch(() => ({ data: [] as LoanApplication[] })),
+    ])
+
+    const leads: RecentLead[] = [
+      ...inquiriesRes.data.map((inquiry: { id: string; name: string; email?: string; message?: string; status: string; createdAt: string; property?: { title?: string } }) => ({
+        kind: 'inquiry' as const,
+        createdAt: inquiry.createdAt,
+        data: inquiry,
+      })),
+      ...loansRes.data.map((loan: LoanApplication) => ({
+        kind: 'pm-loan' as const,
+        createdAt: loan.createdAt ?? '',
+        data: loan,
+      })),
+    ]
+
+    return leads
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 5)
   })
 
   return (
@@ -48,32 +73,32 @@ export default function DashboardPage() {
         <StatsCard
           title="Total Inquiries"
           value={stats?.totalInquiries || 0}
-          description="Customer inquiries received"
+          description="Website inquiries & PM Loan applications"
           icon="📧"
         />
         <StatsCard
           title="New Inquiries"
           value={stats?.newInquiries || 0}
-          description="Unread inquiries"
+          description="Unread inquiries & loan applications"
           icon="🆕"
         />
         <StatsCard
-          title="News Articles"
-          value={stats?.totalNews || 0}
-          description="Published articles"
-          icon="📰"
+          title="PM Loan Applications"
+          value={stats?.totalLoanApplications || 0}
+          description="PM Loan Scheme submissions"
+          icon="🏦"
         />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Recent Inquiries */}
+        {/* Recent Leads */}
         <Card>
           <CardHeader>
             <CardTitle>Recent Inquiries</CardTitle>
-            <CardDescription>Latest customer inquiries</CardDescription>
+            <CardDescription>Latest website inquiries and PM Loan applications</CardDescription>
           </CardHeader>
           <CardContent>
-            <RecentInquiries inquiries={recentInquiries || []} />
+            <RecentLeads leads={recentLeads || []} />
           </CardContent>
         </Card>
 
