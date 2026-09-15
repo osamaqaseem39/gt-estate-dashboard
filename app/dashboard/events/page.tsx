@@ -1,16 +1,16 @@
 'use client'
 
-import { api } from '@/lib/api'
+import { api, resolveDashboardMediaUrl } from '@/lib/api'
 import { EntityListPage } from '@/components/crud/EntityListPage'
-import type { EntityColumn, EntityField, EntityFormValues } from '@/components/crud/types'
+import type { EntityColumn, EntityField, EntityFormValues, MediaItem } from '@/components/crud/types'
 
 interface Event {
   id: string
   title: string
   slug: string
   description: string
-  images: { url: string; alt?: string; title?: string }[]
-  videos: { url: string; title?: string }[]
+  images: MediaItem[]
+  videos: MediaItem[]
   metaTitle?: string
   metaDescription?: string
   published: boolean
@@ -18,46 +18,49 @@ interface Event {
 }
 
 const fields: EntityField[] = [
-  { name: 'title', label: 'Title', type: 'text', required: true },
-  {
-    name: 'slug',
-    label: 'Slug',
-    type: 'text',
-    required: true,
-    placeholder: 'annual-investor-meetup',
-    helpText: 'URL path segment for /events/[slug].',
-  },
+  { name: 'title', label: 'Title', type: 'text', required: true, colSpan: 2 },
   { name: 'description', label: 'Description', type: 'richtext', colSpan: 2 },
   {
     name: 'images',
-    label: 'Images (JSON)',
-    type: 'textarea',
+    label: 'Images',
+    type: 'images',
     colSpan: 2,
-    helpText: 'Array of { "url", "alt", "title" } objects.',
-    placeholder: '[{"url":"/uploads/…","alt":"","title":""}]',
+    helpText: 'Upload as many photos as you like; they show as this event’s gallery on the /events page.',
   },
   {
     name: 'videos',
-    label: 'Videos (JSON)',
-    type: 'textarea',
+    label: 'Videos',
+    type: 'videos',
     colSpan: 2,
-    helpText: 'Array of { "url", "title" } objects.',
-    placeholder: '[{"url":"https://…","title":""}]',
+    helpText: 'Upload video files or paste YouTube links.',
   },
-  { name: 'metaTitle', label: 'Meta title', type: 'text' },
-  { name: 'metaDescription', label: 'Meta description', type: 'textarea' },
-  { name: 'sortOrder', label: 'Sort order', type: 'number', placeholder: '0' },
+  { name: 'sortOrder', label: 'Sort order', type: 'number', placeholder: '0', helpText: 'Lower numbers appear first.' },
   { name: 'published', label: 'Published', type: 'checkbox' },
 ]
 
 const columns: EntityColumn<Event>[] = [
-  { header: 'Title', render: (row) => <span className="font-medium text-gray-900">{row.title}</span> },
-  { header: 'Slug', render: (row) => <code className="text-xs text-gray-500">/{row.slug}</code> },
+  {
+    header: 'Event',
+    render: (row) => {
+      const cover = row.images?.[0]?.url
+      return (
+        <div className="flex items-center gap-3">
+          {cover ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={resolveDashboardMediaUrl(cover)} alt="" className="h-10 w-14 rounded object-cover" />
+          ) : (
+            <div className="h-10 w-14 rounded bg-gray-100" />
+          )}
+          <span className="font-medium text-gray-900">{row.title}</span>
+        </div>
+      )
+    },
+  },
   {
     header: 'Media',
     render: (row) => (
       <span className="text-xs text-gray-500">
-        {(row.images?.length ?? 0)} img · {(row.videos?.length ?? 0)} vid
+        {row.images?.length ?? 0} images · {row.videos?.length ?? 0} videos
       </span>
     ),
   },
@@ -75,56 +78,39 @@ const columns: EntityColumn<Event>[] = [
   },
 ]
 
-function stringifyJson(value: unknown, fallback: string): string {
-  if (value == null) return fallback
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return fallback
-  }
-}
-
-function parseJsonArray<T>(raw: string, fieldLabel: string): T[] {
-  const trimmed = raw.trim()
-  if (!trimmed) return []
-  const parsed = JSON.parse(trimmed) as unknown
-  if (!Array.isArray(parsed)) throw new Error(`${fieldLabel} must be a JSON array`)
-  return parsed as T[]
-}
-
 function toFormDefaults(row: Event | null): EntityFormValues {
   return {
     title: row?.title ?? '',
-    slug: row?.slug ?? '',
     description: row?.description ?? '',
-    images: stringifyJson(row?.images, '[]'),
-    videos: stringifyJson(row?.videos, '[]'),
-    metaTitle: row?.metaTitle ?? '',
-    metaDescription: row?.metaDescription ?? '',
-    sortOrder: row ? String(row.sortOrder) : '0',
-    published: row?.published ?? false,
+    images: row?.images ?? [],
+    videos: row?.videos ?? [],
+    sortOrder: row ? String(row.sortOrder ?? 0) : '0',
+    published: row?.published ?? true,
   }
 }
 
 function toPayload(values: EntityFormValues) {
+  const media = (v: unknown) => (Array.isArray(v) ? (v as MediaItem[]).filter((m) => m.url?.trim()) : [])
   return {
     title: values.title as string,
-    slug: values.slug as string,
     description: values.description as string,
-    images: parseJsonArray(values.images as string, 'Images'),
-    videos: parseJsonArray(values.videos as string, 'Videos'),
-    metaTitle: (values.metaTitle as string) || undefined,
-    metaDescription: (values.metaDescription as string) || undefined,
+    images: media(values.images),
+    videos: media(values.videos),
     sortOrder: Number(values.sortOrder) || 0,
     published: Boolean(values.published),
   }
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  const apiError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+  return apiError || (err instanceof Error ? err.message : fallback)
 }
 
 export default function EventsPage() {
   return (
     <EntityListPage<Event>
       title="Events"
-      description="Manage event pages shown on the public /events section."
+      description="All published events are listed together on the public /events page, each with its photo and video gallery."
       queryKey="events"
       fetchList={async () => (await api.get('/events')).data}
       columns={columns}
@@ -135,22 +121,14 @@ export default function EventsPage() {
         try {
           await api.post('/events', toPayload(values))
         } catch (err) {
-          const msg =
-            err instanceof Error
-              ? err.message
-              : (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-          throw new Error(msg || 'Failed to create event')
+          throw new Error(errorMessage(err, 'Failed to create event'))
         }
       }}
       onUpdate={async (id, values) => {
         try {
           await api.patch(`/events/${id}`, toPayload(values))
         } catch (err) {
-          const msg =
-            err instanceof Error
-              ? err.message
-              : (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-          throw new Error(msg || 'Failed to update event')
+          throw new Error(errorMessage(err, 'Failed to update event'))
         }
       }}
       onDelete={async (id) => {

@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FileUpload } from '@/components/ui/file-upload'
+import { MediaListUpload } from '@/components/ui/media-list-upload'
 import { RichTextEditor } from '@/components/ui/RichTextEditor'
 import type { EntityField, EntityFormValues } from './types'
 
@@ -140,6 +141,20 @@ export function EntityFormModal({
                     render={({ field: rhf }) => (
                       <div className="mt-1">
                         <FileUpload value={(rhf.value as string) ?? ''} onChange={rhf.onChange} />
+                      </div>
+                    )}
+                  />
+                ) : field.type === 'images' || field.type === 'videos' ? (
+                  <Controller
+                    name={field.name}
+                    control={control}
+                    render={({ field: rhf }) => (
+                      <div className="mt-1">
+                        <MediaListUpload
+                          kind={field.type === 'videos' ? 'video' : 'image'}
+                          value={Array.isArray(rhf.value) ? rhf.value : []}
+                          onChange={rhf.onChange}
+                        />
                       </div>
                     )}
                   />

@@ -9,6 +9,7 @@
 
 const DEFAULT_ENDPOINT = 'https://gt.osamaqaseem.online/upload.php'
 const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const DEFAULT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (raw == null || raw.trim() === '') return fallback
@@ -34,8 +35,17 @@ export function getMaxImageUploadLabel(): string {
   return formatSize(getMaxImageUploadBytes())
 }
 
+/** Video max via NEXT_PUBLIC_MAX_VIDEO_UPLOAD_BYTES, default 50 MiB (the upload server must also allow it). */
+export function getMaxVideoUploadBytes(): number {
+  return parsePositiveInt(process.env.NEXT_PUBLIC_MAX_VIDEO_UPLOAD_BYTES, DEFAULT_MAX_VIDEO_BYTES)
+}
+
+export function getMaxVideoUploadLabel(): string {
+  return formatSize(getMaxVideoUploadBytes())
+}
+
 export function assertImageFileWithinUploadLimit(file: File): void {
-  const max = getMaxImageUploadBytes()
+  const max = file.type.startsWith('video/') ? getMaxVideoUploadBytes() : getMaxImageUploadBytes()
   if (file.size > max) {
     throw new Error(`File is too large (${formatSize(file.size)}). Maximum is ${formatSize(max)}.`)
   }

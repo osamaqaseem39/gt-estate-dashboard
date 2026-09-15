@@ -1,119 +1,141 @@
 'use client'
 
+import Link from 'next/link'
+import { Users } from 'lucide-react'
 import { api } from '@/lib/api'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { EntityListPage } from '@/components/crud/EntityListPage'
 import type { EntityColumn, EntityField, EntityFormValues } from '@/components/crud/types'
 
-interface Career {
+interface JobPosting {
   id: string
-  fullName: string
-  email: string
-  phone?: string
-  position?: string
-  city?: string
+  title: string
+  department?: string
+  location?: string
+  employmentType?: string
   experience?: string
-  coverNote?: string
-  resumeUrl?: string
-  status: string
-  createdAt: string
+  description?: string
+  requirements?: string[]
+  published: boolean
+  sortOrder: number
+  createdAt?: string
 }
 
-const STATUS_OPTIONS = [
-  { label: 'New', value: 'new' },
-  { label: 'Reviewed', value: 'reviewed' },
-  { label: 'Shortlisted', value: 'shortlisted' },
-  { label: 'Rejected', value: 'rejected' },
-  { label: 'Hired', value: 'hired' },
-]
+const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Contract', 'Internship'].map((v) => ({ label: v, value: v }))
 
 const fields: EntityField[] = [
-  { name: 'fullName', label: 'Full name', type: 'text', required: true },
-  { name: 'email', label: 'Email', type: 'text', required: true },
-  { name: 'phone', label: 'Phone', type: 'text' },
-  { name: 'position', label: 'Position applied for', type: 'text' },
-  { name: 'city', label: 'City', type: 'text' },
-  { name: 'experience', label: 'Experience', type: 'text' },
-  { name: 'resumeUrl', label: 'Resume / CV link', type: 'text' },
-  { name: 'coverNote', label: 'Cover note', type: 'textarea', colSpan: 2 },
-  { name: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
+  { name: 'title', label: 'Job title', type: 'text', required: true, placeholder: 'Sales Executive' },
+  { name: 'department', label: 'Department', type: 'text', placeholder: 'Sales' },
+  { name: 'location', label: 'Location', type: 'text', placeholder: 'Lahore' },
+  { name: 'employmentType', label: 'Employment type', type: 'select', options: EMPLOYMENT_TYPES },
+  { name: 'experience', label: 'Experience required', type: 'text', placeholder: '1–2 years' },
+  { name: 'sortOrder', label: 'Sort order', type: 'number', placeholder: '0' },
+  { name: 'description', label: 'Job description', type: 'textarea', colSpan: 2 },
+  {
+    name: 'requirements',
+    label: 'Requirements',
+    type: 'textarea',
+    colSpan: 2,
+    helpText: 'One requirement per line.',
+  },
+  { name: 'published', label: 'Published (visible on /careers and in the application form)', type: 'checkbox', colSpan: 2 },
 ]
 
-const columns: EntityColumn<Career>[] = [
-  { header: 'Name', render: (row) => <span className="font-medium text-gray-900">{row.fullName}</span> },
-  { header: 'Email', render: (row) => row.email },
-  { header: 'Position', render: (row) => row.position || '—' },
-  { header: 'City', render: (row) => row.city || '—' },
-  {
-    header: 'Resume',
-    render: (row) =>
-      row.resumeUrl ? (
-        <a href={row.resumeUrl} target="_blank" rel="noreferrer" className="text-primary-600 underline">
-          View
-        </a>
-      ) : (
-        '—'
-      ),
-  },
+const columns: EntityColumn<JobPosting>[] = [
+  { header: 'Job title', render: (row) => <span className="font-medium text-gray-900">{row.title}</span> },
+  { header: 'Department', render: (row) => row.department || '—' },
+  { header: 'Location', render: (row) => row.location || '—' },
+  { header: 'Type', render: (row) => row.employmentType || '—' },
   {
     header: 'Status',
     render: (row) => (
-      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium capitalize text-gray-700">
-        {row.status}
+      <span
+        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+          row.published ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+        }`}
+      >
+        {row.published ? 'Open' : 'Hidden'}
       </span>
     ),
   },
 ]
 
-function toFormDefaults(row: Career | null): EntityFormValues {
+function toFormDefaults(row: JobPosting | null): EntityFormValues {
   return {
-    fullName: row?.fullName ?? '',
-    email: row?.email ?? '',
-    phone: row?.phone ?? '',
-    position: row?.position ?? '',
-    city: row?.city ?? '',
+    title: row?.title ?? '',
+    department: row?.department ?? '',
+    location: row?.location ?? '',
+    employmentType: row?.employmentType ?? 'Full-time',
     experience: row?.experience ?? '',
-    resumeUrl: row?.resumeUrl ?? '',
-    coverNote: row?.coverNote ?? '',
-    status: row?.status ?? 'new',
+    sortOrder: row ? String(row.sortOrder ?? 0) : '0',
+    description: row?.description ?? '',
+    requirements: (row?.requirements ?? []).join('\n'),
+    published: row?.published ?? true,
   }
 }
 
 function toPayload(values: EntityFormValues) {
   return {
-    fullName: values.fullName as string,
-    email: values.email as string,
-    phone: (values.phone as string) || undefined,
-    position: (values.position as string) || undefined,
-    city: (values.city as string) || undefined,
-    experience: (values.experience as string) || undefined,
-    resumeUrl: (values.resumeUrl as string) || undefined,
-    coverNote: (values.coverNote as string) || undefined,
-    status: (values.status as string) || 'new',
+    title: values.title as string,
+    department: values.department as string,
+    location: values.location as string,
+    employmentType: values.employmentType as string,
+    experience: values.experience as string,
+    sortOrder: Number(values.sortOrder) || 0,
+    description: values.description as string,
+    requirements: String(values.requirements || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    published: Boolean(values.published),
   }
 }
 
-export default function CareersPage() {
+function errorMessage(err: unknown, fallback: string): string {
+  const apiError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+  return apiError || (err instanceof Error ? err.message : fallback)
+}
+
+export default function PostJobPage() {
   return (
-    <EntityListPage<Career>
-      title="Careers"
-      description="Job applications submitted through the careers page."
-      queryKey="careers"
-      fetchList={async () => (await api.get('/careers')).data}
-      columns={columns}
-      getId={(row) => row.id}
-      fields={fields}
-      getFormDefaults={toFormDefaults}
-      onCreate={async (values) => {
-        await api.post('/careers', toPayload(values))
-      }}
-      onUpdate={async (id, values) => {
-        await api.patch(`/careers/${id}`, toPayload(values))
-      }}
-      onDelete={async (id) => {
-        await api.delete(`/careers/${id}`)
-      }}
-      addButtonLabel="Add Application"
-      emptyMessage="No applications yet"
-    />
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Link href="/dashboard/careers/applications" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
+          <Users className="mr-2 h-4 w-4" />
+          View job applications
+        </Link>
+      </div>
+      <EntityListPage<JobPosting>
+        title="Post a Job"
+        description="Open positions listed on the public /careers page. Applicants choose from these when applying."
+        queryKey="career-jobs"
+        fetchList={async () => (await api.get('/careers/jobs')).data}
+        columns={columns}
+        getId={(row) => row.id}
+        fields={fields}
+        getFormDefaults={toFormDefaults}
+        onCreate={async (values) => {
+          try {
+            await api.post('/careers/jobs', toPayload(values))
+          } catch (err) {
+            throw new Error(errorMessage(err, 'Failed to post job'))
+          }
+        }}
+        onUpdate={async (id, values) => {
+          try {
+            await api.patch(`/careers/jobs/${id}`, toPayload(values))
+          } catch (err) {
+            throw new Error(errorMessage(err, 'Failed to update job'))
+          }
+        }}
+        onDelete={async (id) => {
+          await api.delete(`/careers/jobs/${id}`)
+        }}
+        addButtonLabel="Post a Job"
+        emptyMessage="No jobs posted yet."
+        formTitle={(editing) => (editing ? 'Edit Job' : 'Post a Job')}
+      />
+    </div>
   )
 }

@@ -23,8 +23,9 @@ export default function DashboardPage() {
 
     return {
       totalProperties: properties.length,
-      totalInquiries: inquiries.length + loanApplications.length,
-      newInquiries: newInquiries + newLoans,
+      totalInquiries: inquiries.length,
+      newInquiries,
+      newLoanApplications: newLoans,
       totalLoanApplications: loanApplications.length,
       totalNews: news.length,
       totalGallery: gallery.length,
@@ -73,19 +74,19 @@ export default function DashboardPage() {
         <StatsCard
           title="Total Inquiries"
           value={stats?.totalInquiries || 0}
-          description="Website inquiries & PM Loan applications"
+          description="Website contact & inquiry forms"
           icon="📧"
         />
         <StatsCard
           title="New Inquiries"
           value={stats?.newInquiries || 0}
-          description="Unread inquiries & loan applications"
+          description="Website inquiries awaiting a reply"
           icon="🆕"
         />
         <StatsCard
           title="PM Loan Applications"
           value={stats?.totalLoanApplications || 0}
-          description="PM Loan Scheme submissions"
+          description={`PM Loan Scheme submissions · ${stats?.newLoanApplications || 0} new`}
           icon="🏦"
         />
       </div>

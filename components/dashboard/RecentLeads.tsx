@@ -18,7 +18,9 @@ interface LoanApplication {
   id: string
   fullName: string
   email?: string
-  mobileNumber: string
+  mobileNumber?: string
+  cnicNumber?: string
+  propertyType?: string
   status: string
   createdAt?: string
   city?: string
@@ -109,7 +111,7 @@ export function RecentLeads({ leads }: RecentLeadsProps) {
         return (
           <Link
             key={`pm-loan-${loan.id}`}
-            href={`/dashboard/inquiries/pm-loan/${loan.id}`}
+            href={`/dashboard/loan-applications/${loan.id}`}
             className="flex items-start space-x-3 rounded-lg bg-gray-50 p-3 transition-colors hover:bg-amber-50"
           >
             <div className="flex-shrink-0">
@@ -129,7 +131,7 @@ export function RecentLeads({ leads }: RecentLeadsProps) {
               <span className="mb-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                 PM Loan application
               </span>
-              <p className="truncate text-sm text-gray-500">{loan.mobileNumber}</p>
+              <p className="truncate text-sm text-gray-500">{loan.mobileNumber || (loan.cnicNumber ? `CNIC ${loan.cnicNumber}` : loan.propertyType) || '—'}</p>
               <p className="mt-1 text-sm text-gray-600">
                 Loan amount: {loanAmountLabel(loan)}
                 {loan.city ? ` · ${loan.city}` : ''}

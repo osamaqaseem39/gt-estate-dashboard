@@ -17,6 +17,8 @@ import {
   Briefcase,
   Calendar,
   CreditCard,
+  Landmark,
+  UserCheck,
   ChevronDown,
   type LucideIcon,
 } from 'lucide-react'
@@ -63,18 +65,32 @@ const navDropdowns: NavDropdown[] = [
     items: [
       { name: 'What We Do', href: '/dashboard/what-we-do', icon: Info },
       { name: 'Blog', href: '/dashboard/news', icon: Newspaper },
-      { name: 'Careers', href: '/dashboard/careers', icon: Briefcase },
+      { name: 'Post a Job', href: '/dashboard/careers', icon: Briefcase },
     ],
   },
 ]
 
 const leadsGroup: NavGroup = {
   label: 'Leads',
-  items: [{ name: 'Inquiries', href: '/dashboard/inquiries', icon: Mail }],
+  items: [
+    { name: 'Inquiries', href: '/dashboard/inquiries', icon: Mail },
+    { name: 'PM Loan Applications', href: '/dashboard/loan-applications', icon: Landmark },
+    { name: 'Job Applications', href: '/dashboard/careers/applications', icon: UserCheck },
+  ],
 }
 
+const allHrefs = [
+  ...topLevelItems,
+  ...contentItems,
+  ...navDropdowns.flatMap((d) => d.items),
+  ...leadsGroup.items,
+].map((item) => item.href)
+
 function isNavActive(pathname: string, href: string): boolean {
-  return pathname === href || (href !== '/dashboard' && pathname.startsWith(`${href}/`))
+  if (pathname === href) return true
+  if (href === '/dashboard' || !pathname.startsWith(`${href}/`)) return false
+  // Defer to a more specific nav entry that also matches (e.g. /dashboard/careers/applications)
+  return !allHrefs.some((other) => other.length > href.length && (pathname === other || pathname.startsWith(`${other}/`)))
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {

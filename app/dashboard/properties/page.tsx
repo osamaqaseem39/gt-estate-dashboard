@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Search, Edit, Trash2, Eye, X } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Eye, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { MediaListUpload } from '@/components/ui/media-list-upload'
+import type { MediaItem } from '@/components/crud/types'
 import { api, resolveDashboardMediaUrl } from '@/lib/api'
 import {
   assertImageFileWithinUploadLimit,
@@ -37,6 +39,18 @@ type GalleryEntry = {
   title: string
 }
 
+type FloorEntry = {
+  _id?: string
+  name: string
+  area: string
+  description: string
+  /** Edited as one feature per line. */
+  features: string
+  images: MediaItem[]
+}
+
+const FLOOR_NAME_SUGGESTIONS = ['Basement', 'Ground Floor', '1st Floor', '2nd Floor', '3rd Floor', 'Rooftop']
+
 type PropertyFormState = {
   title: string
   slug: string
@@ -52,6 +66,7 @@ type PropertyFormState = {
   gallery: GalleryEntry[]
   inventory: string
   paymentPlan: string
+  floors: FloorEntry[]
 }
 
 const emptyForm: PropertyFormState = {
@@ -69,6 +84,32 @@ const emptyForm: PropertyFormState = {
   gallery: [],
   inventory: '[]',
   paymentPlan: JSON.stringify({ enabled: false, title: 'Payment Plan', rows: [] }, null, 2),
+  floors: [],
+}
+
+function toFloorEntries(raw: unknown): FloorEntry[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object')
+    .map((f) => ({
+      _id: typeof f._id === 'string' ? f._id : undefined,
+      name: String(f.name ?? ''),
+      area: String(f.area ?? ''),
+      description: String(f.description ?? ''),
+      features: Array.isArray(f.features) ? f.features.map(String).join('\n') : '',
+      images: Array.isArray(f.images)
+        ? f.images.map(normalizeGalleryEntry).filter((g): g is GalleryEntry => g !== null)
+        : [],
+    }))
+}
+
+/** Prefer the API's `{ error }` body over axios' generic "Request failed with status code …". */
+function apiErrorMessage(err: unknown, fallback: string): string {
+  const data = (err as { response?: { status?: number; data?: { error?: string; message?: string } } })?.response
+  const detail = data?.data?.error || data?.data?.message
+  if (detail) return detail
+  if (data?.status === 413) return 'Request too large — remove some images or shorten the description.'
+  return err instanceof Error ? err.message : fallback
 }
 
 function propertyId(p: { _id?: string; id?: string }) {
@@ -124,6 +165,7 @@ export default function PropertiesPage() {
   const primaryInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
   const [primaryObjectUrl, setPrimaryObjectUrl] = useState<string | null>(null)
+  const formCardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!primaryFile) {
@@ -194,9 +236,54 @@ export default function PropertiesPage() {
         property.paymentPlan,
         JSON.stringify({ enabled: false, title: 'Payment Plan', rows: [] }, null, 2),
       ),
+      floors: toFloorEntries(property.floors),
     })
     resetFiles()
     setShowForm(true)
+  }
+
+  // The form renders above the property grid; bring it into view so edits aren't made off-screen.
+  useEffect(() => {
+    if (showForm) formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [showForm, editingProperty])
+
+  const addFloor = () => {
+    setForm((prev) => ({
+      ...prev,
+      floors: [
+        ...prev.floors,
+        {
+          name:
+            FLOOR_NAME_SUGGESTIONS.slice(1).find((n) => !prev.floors.some((f) => f.name.trim() === n)) ??
+            `Floor ${prev.floors.length + 1}`,
+          area: '',
+          description: '',
+          features: '',
+          images: [],
+        },
+      ],
+    }))
+  }
+
+  const updateFloor = (index: number, patch: Partial<FloorEntry>) => {
+    setForm((prev) => ({
+      ...prev,
+      floors: prev.floors.map((f, i) => (i === index ? { ...f, ...patch } : f)),
+    }))
+  }
+
+  const moveFloor = (index: number, delta: number) => {
+    setForm((prev) => {
+      const target = index + delta
+      if (target < 0 || target >= prev.floors.length) return prev
+      const floors = [...prev.floors]
+      ;[floors[index], floors[target]] = [floors[target], floors[index]]
+      return { ...prev, floors }
+    })
+  }
+
+  const removeFloor = (index: number) => {
+    setForm((prev) => ({ ...prev, floors: prev.floors.filter((_, i) => i !== index) }))
   }
 
   const addGalleryEntry = (entry: GalleryEntry) => {
@@ -290,6 +377,16 @@ export default function PropertiesPage() {
         gallery,
         inventory,
         paymentPlan,
+        floors: form.floors
+          .filter((f) => f.name.trim())
+          .map((f) => ({
+            ...(f._id && { _id: f._id }),
+            name: f.name.trim(),
+            area: f.area.trim(),
+            description: f.description.trim(),
+            features: f.features.split('\n').map((s) => s.trim()).filter(Boolean),
+            images: f.images.filter((img) => img.url.trim()),
+          })),
       }
 
       if (editingProperty && id) {
@@ -306,8 +403,7 @@ export default function PropertiesPage() {
       resetFiles()
       refetch()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save property'
-      toast.error(message)
+      toast.error(apiErrorMessage(err, 'Failed to save property'))
     } finally {
       setSaving(false)
     }
@@ -338,7 +434,7 @@ export default function PropertiesPage() {
       </div>
 
       {showForm && (
-        <Card>
+        <Card ref={formCardRef} className="scroll-mt-20">
           <CardHeader>
             <CardTitle>{editingProperty ? 'Edit property' : 'Add property'}</CardTitle>
             <CardDescription>
@@ -615,6 +711,96 @@ export default function PropertiesPage() {
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                 />
+              </div>
+              <div className="space-y-3 rounded-lg border border-input p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <Label>Floor-by-floor layout</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Add each floor (Ground Floor, 1st Floor, …) with its area, description, room/feature list and
+                      images. Shown in this order on the project page.
+                    </p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={addFloor}>
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add floor
+                  </Button>
+                </div>
+                {form.floors.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No floors added.</p>
+                )}
+                {form.floors.map((floor, i) => (
+                  <div key={floor._id ?? `new-${i}`} className="space-y-3 rounded-md border border-gray-200 bg-muted/20 p-3">
+                    <div className="flex items-start gap-2">
+                      <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <Label htmlFor={`floor-name-${i}`}>Floor name</Label>
+                          <Input
+                            id={`floor-name-${i}`}
+                            list="floor-name-suggestions"
+                            value={floor.name}
+                            onChange={(e) => updateFloor(i, { name: e.target.value })}
+                            placeholder="Ground Floor"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor={`floor-area-${i}`}>Covered area (optional)</Label>
+                          <Input
+                            id={`floor-area-${i}`}
+                            value={floor.area}
+                            onChange={(e) => updateFloor(i, { area: e.target.value })}
+                            placeholder="e.g. 850 sq ft"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-1 pt-6">
+                        <Button type="button" variant="outline" size="sm" onClick={() => moveFloor(i, -1)} disabled={i === 0} aria-label="Move floor up">
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => moveFloor(i, 1)} disabled={i === form.floors.length - 1} aria-label="Move floor down">
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="text-red-600 hover:text-red-700" onClick={() => removeFloor(i)} aria-label="Remove floor">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor={`floor-desc-${i}`}>Description</Label>
+                        <textarea
+                          id={`floor-desc-${i}`}
+                          className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          rows={4}
+                          value={floor.description}
+                          onChange={(e) => updateFloor(i, { description: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`floor-features-${i}`}>Rooms / features (one per line)</Label>
+                        <textarea
+                          id={`floor-features-${i}`}
+                          className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          rows={4}
+                          value={floor.features}
+                          onChange={(e) => updateFloor(i, { features: e.target.value })}
+                          placeholder={'Drawing room\nKitchen\n1 Bedroom with attached bath'}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Floor plan / images</Label>
+                      <div className="mt-1">
+                        <MediaListUpload kind="image" value={floor.images} onChange={(images) => updateFloor(i, { images: images.map((m) => ({ url: m.url, alt: m.alt ?? '', title: m.title ?? '' })) })} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <datalist id="floor-name-suggestions">
+                  {FLOOR_NAME_SUGGESTIONS.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <Label htmlFor="inventory">Inventory (JSON)</Label>

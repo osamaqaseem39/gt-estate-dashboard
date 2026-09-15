@@ -6,6 +6,8 @@ export type EntityFieldType =
   | 'richtext'
   | 'select'
   | 'image'
+  | 'images'
+  | 'videos'
   | 'checkbox'
   | 'number'
 
@@ -33,4 +35,11 @@ export interface EntityColumn<T> {
   className?: string
 }
 
-export type EntityFormValues = Record<string, string | boolean>
+/** One uploaded image or video. Images use alt/title; videos use title only. */
+export interface MediaItem {
+  url: string
+  alt?: string
+  title?: string
+}
+
+export type EntityFormValues = Record<string, string | boolean | MediaItem[]>
