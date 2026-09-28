@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const DEFAULT_API_ORIGIN = 'https://estate-server-nine.vercel.app'
+const DEFAULT_API_ORIGIN = 'https://gt-estate-server.vercel.app'
 const DEFAULT_MEDIA_ORIGIN = 'https://gt.osamaqaseem.online'
 
 function resolveApiBase(): string {
@@ -14,8 +14,8 @@ function resolveMediaBase(): string {
 const axiosBase = resolveApiBase()
 const mediaBase = resolveMediaBase()
 
-/** Use in user-facing copy (e.g. “backend running at …”). */
-export const API_SERVER_ORIGIN = mediaBase
+/** Same origin the axios client uses. */
+export const API_SERVER_ORIGIN = axiosBase
 
 /** Absolute URL for images stored as `/uploads/...` or full https URLs (dashboard previews & lists). */
 export function resolveDashboardMediaUrl(pathOrUrl: string): string {
