@@ -6,10 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Search, Edit, Trash2, Eye, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Eye, X, ArrowUp, ArrowDown, Layers, Download } from 'lucide-react'
 import { MediaListUpload } from '@/components/ui/media-list-upload'
 import type { MediaItem } from '@/components/crud/types'
-import { api, resolveDashboardMediaUrl } from '@/lib/api'
+import { api, resolveDashboardMediaUrl, downloadDashboardMedia } from '@/lib/api'
 import {
   assertImageFileWithinUploadLimit,
   getMaxImageUploadLabel,
@@ -32,6 +32,18 @@ const PROPERTY_STATUSES = [
   { value: 'reserved', label: 'Reserved' },
   { value: 'coming_soon', label: 'Coming soon' },
 ] as const
+
+const DEVELOPMENT_STATUSES = [
+  { value: 'on_ground', label: 'On ground (possession ready)' },
+  { value: 'under_construction', label: 'Under construction' },
+  { value: 'planned', label: 'Planned / launching' },
+] as const
+
+const DEVELOPMENT_STATUS_LABELS: Record<string, string> = {
+  on_ground: 'On ground',
+  under_construction: 'Under construction',
+  planned: 'Planned',
+}
 
 type GalleryEntry = {
   url: string
@@ -60,6 +72,9 @@ type PropertyFormState = {
   marla: string
   type: string
   status: string
+  /** Empty = main development; otherwise the id of the main project this block belongs to. */
+  parentId: string
+  developmentStatus: string
   featured: boolean
   sortOrder: string
   primaryImageUrl: string
@@ -78,6 +93,8 @@ const emptyForm: PropertyFormState = {
   marla: '',
   type: 'residential',
   status: 'available',
+  parentId: '',
+  developmentStatus: '',
   featured: false,
   sortOrder: '0',
   primaryImageUrl: '',
@@ -114,6 +131,43 @@ function apiErrorMessage(err: unknown, fallback: string): string {
 
 function propertyId(p: { _id?: string; id?: string }) {
   return p._id ?? p.id ?? ''
+}
+
+type PropertyRecord = Record<string, unknown>
+
+function parentIdOf(p: PropertyRecord): string {
+  return typeof p.parentId === 'string' ? p.parentId : ''
+}
+
+type PropertyGroup = { parent: PropertyRecord; blocks: PropertyRecord[] }
+
+/** Main projects in API order, each followed by its blocks; blocks whose parent is missing stand alone. */
+function groupByParent(all: PropertyRecord[], visible: PropertyRecord[]): PropertyGroup[] {
+  const visibleIds = new Set(visible.map((p) => propertyId(p as { _id?: string; id?: string })))
+  const byId = new Map(all.map((p) => [propertyId(p as { _id?: string; id?: string }), p]))
+  const blocksByParent = new Map<string, PropertyRecord[]>()
+  const groups: PropertyGroup[] = []
+
+  for (const p of visible) {
+    const pid = parentIdOf(p)
+    if (pid && byId.has(pid)) {
+      const list = blocksByParent.get(pid) ?? []
+      list.push(p)
+      blocksByParent.set(pid, list)
+    }
+  }
+
+  for (const p of all) {
+    const id = propertyId(p as { _id?: string; id?: string })
+    const pid = parentIdOf(p)
+    if (pid && byId.has(pid)) continue
+    const blocks = (blocksByParent.get(id) ?? []).sort(
+      (a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0),
+    )
+    // Keep a non-matching parent visible when one of its blocks matches the search.
+    if (visibleIds.has(id) || blocks.length > 0) groups.push({ parent: p, blocks })
+  }
+  return groups
 }
 
 function normalizeGalleryEntry(item: unknown): GalleryEntry | null {
@@ -183,13 +237,27 @@ export default function PropertiesPage() {
     : form.primaryImageUrl.trim() || '—'
 
   const { data: properties, refetch } = useQuery('properties', async () => {
-    const response = await api.get('/properties')
-    return response.data
+    const response = await api.get('/properties', { params: { scope: 'all' } })
+    return response.data as PropertyRecord[]
   })
+
+  const allProperties: PropertyRecord[] = Array.isArray(properties) ? properties : []
+  const titleById = new Map(
+    allProperties.map((p) => [propertyId(p as { _id?: string; id?: string }), String(p.title ?? '')]),
+  )
+  const editingId = editingProperty ? propertyId(editingProperty as { _id?: string; id?: string }) : ''
+  const editingHasBlocks = Boolean(editingId) && allProperties.some((p) => parentIdOf(p) === editingId)
+  const parentOptions = allProperties.filter(
+    (p) => !parentIdOf(p) && propertyId(p as { _id?: string; id?: string }) !== editingId,
+  )
 
   const handleDelete = async (id: string) => {
     if (!id) return
-    if (!confirm('Are you sure you want to delete this property?')) return
+    const blockCount = allProperties.filter((p) => parentIdOf(p) === id).length
+    const message = blockCount
+      ? `This project has ${blockCount} block(s). Deleting it keeps the blocks as standalone projects. Continue?`
+      : 'Are you sure you want to delete this property?'
+    if (!confirm(message)) return
     try {
       await api.delete(`/properties/${id}`)
       toast.success('Property deleted successfully')
@@ -213,6 +281,18 @@ export default function PropertiesPage() {
     setShowForm(true)
   }
 
+  const startCreateBlock = (parent: PropertyRecord) => {
+    setEditingProperty(null)
+    setForm({
+      ...emptyForm,
+      parentId: propertyId(parent as { _id?: string; id?: string }),
+      location: String(parent.location ?? ''),
+      type: String(parent.type ?? 'residential'),
+    })
+    resetFiles()
+    setShowForm(true)
+  }
+
   const startEdit = (property: Record<string, unknown>) => {
     setEditingProperty(property)
     const gallery = Array.isArray(property.gallery)
@@ -227,6 +307,8 @@ export default function PropertiesPage() {
       marla: String(property.marla ?? ''),
       type: String(property.type ?? 'residential'),
       status: String(property.status ?? 'available'),
+      parentId: parentIdOf(property),
+      developmentStatus: String(property.developmentStatus ?? ''),
       featured: Boolean(property.featured),
       sortOrder: property.sortOrder != null ? String(property.sortOrder) : '0',
       primaryImageUrl: String(property.primaryImage ?? ''),
@@ -370,6 +452,8 @@ export default function PropertiesPage() {
         marla: form.marla.trim(),
         type: form.type || 'residential',
         status: form.status || 'available',
+        parentId: form.parentId || null,
+        developmentStatus: form.developmentStatus || null,
         featured: form.featured,
         sortOrder: form.sortOrder.trim() === '' ? 0 : Number(form.sortOrder),
         price: priceTrim === '' ? null : Number(priceTrim),
@@ -409,13 +493,163 @@ export default function PropertiesPage() {
     }
   }
 
-  const filteredProperties =
-    properties?.filter((property: { title?: string; location?: string }) => {
-      const t = (property.title ?? '').toLowerCase()
-      const loc = (property.location ?? '').toLowerCase()
-      const q = searchTerm.toLowerCase()
-      return t.includes(q) || loc.includes(q)
-    }) || []
+  const filteredProperties = allProperties.filter((property) => {
+    const t = String(property.title ?? '').toLowerCase()
+    const loc = String(property.location ?? '').toLowerCase()
+    const q = searchTerm.toLowerCase()
+    return t.includes(q) || loc.includes(q)
+  })
+
+  const groups = groupByParent(allProperties, filteredProperties)
+  const blockTotal = allProperties.filter((p) => parentIdOf(p) && titleById.has(parentIdOf(p))).length
+
+  // Consecutive projects without blocks share one grid; a project with blocks gets its own section.
+  const segments: Array<{ kind: 'grid'; items: PropertyRecord[] } | { kind: 'family'; group: PropertyGroup }> = []
+  for (const group of groups) {
+    if (group.blocks.length > 0) {
+      segments.push({ kind: 'family', group })
+      continue
+    }
+    const last = segments[segments.length - 1]
+    if (last?.kind === 'grid') last.items.push(group.parent)
+    else segments.push({ kind: 'grid', items: [group.parent] })
+  }
+
+  const renderCard = (property: PropertyRecord) => {
+    const pid = propertyId(property as { _id?: string; id?: string })
+    const img = resolveDashboardMediaUrl(String(property.primaryImage ?? ''))
+    const rawPrimary = String(property.primaryImage ?? '')
+    const priceVal = property.price
+    const priceLabel =
+      priceVal != null && priceVal !== ''
+        ? Number(priceVal).toLocaleString(undefined, { maximumFractionDigits: 0 })
+        : null
+    const parentTitle = titleById.get(parentIdOf(property))
+    const isBlock = Boolean(parentTitle)
+    const blockCount = isBlock ? 0 : allProperties.filter((p) => parentIdOf(p) === pid).length
+    const devStatus = DEVELOPMENT_STATUS_LABELS[String(property.developmentStatus ?? '')]
+    return (
+      <div
+        key={pid}
+        className={`bg-white border rounded-lg overflow-hidden shadow-sm ${isBlock ? 'border-l-4 border-l-primary-400' : ''}`}
+      >
+        {img ? (
+          <div className="relative w-full h-48 bg-gray-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={img} alt={String(property.title ?? '')} className="w-full h-48 object-cover" />
+          </div>
+        ) : (
+          <div className="w-full h-48 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
+            No image
+          </div>
+        )}
+        {rawPrimary ? (
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/80">
+            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Image URL</p>
+            <button
+              type="button"
+              className="text-[11px] font-mono text-primary-700 break-all line-clamp-2 text-left underline-offset-2 hover:underline"
+              title="Download image"
+              onClick={async () => {
+                try {
+                  await downloadDashboardMedia(rawPrimary)
+                } catch {
+                  toast.error('Could not download image')
+                }
+              }}
+            >
+              {rawPrimary}
+            </button>
+          </div>
+        ) : null}
+        <div className="p-4">
+          {isBlock ? (
+            <p className="text-xs font-medium text-primary-700 mb-1">Block of {parentTitle}</p>
+          ) : null}
+          <div className="flex justify-between items-start mb-2 gap-2">
+            <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">{String(property.title ?? '')}</h3>
+            <span
+              className={`shrink-0 px-2 py-1 text-xs font-medium rounded-full ${
+                property.status === 'available'
+                  ? 'bg-green-100 text-green-800'
+                  : property.status === 'sold'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
+              {String(property.status ?? '')}
+            </span>
+          </div>
+          <p className="text-gray-600 text-sm mb-1 line-clamp-1">{String(property.location ?? '')}</p>
+          <p className="text-sm text-gray-500 mb-2">{String(property.marla ?? '')}</p>
+          {devStatus || blockCount > 0 ? (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {devStatus ? (
+                <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-800">{devStatus}</span>
+              ) : null}
+              {blockCount > 0 ? (
+                <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700">
+                  {blockCount} block{blockCount === 1 ? '' : 's'}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {priceLabel != null ? (
+            <p className="text-xl font-bold text-primary-600 mb-3">{priceLabel}</p>
+          ) : (
+            <p className="text-sm text-gray-400 mb-3">No price set</p>
+          )}
+          {property.featured ? <p className="text-xs font-medium text-primary-700 mb-3">Featured on site</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              disabled={!img}
+              onClick={() => img && window.open(img, '_blank', 'noopener,noreferrer')}
+              title="Open image"
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              disabled={!rawPrimary}
+              title="Download image"
+              onClick={async () => {
+                try {
+                  await downloadDashboardMedia(rawPrimary)
+                } catch {
+                  toast.error('Could not download image')
+                }
+              }}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+            <Button size="sm" variant="outline" type="button" onClick={() => startEdit(property)}>
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              onClick={() => handleDelete(pid)}
+              className="text-red-600 hover:text-red-700"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            {!isBlock ? (
+              <Button size="sm" variant="outline" type="button" onClick={() => startCreateBlock(property)}>
+                <Layers className="h-4 w-4 mr-1" />
+                Add block
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -436,7 +670,15 @@ export default function PropertiesPage() {
       {showForm && (
         <Card ref={formCardRef} className="scroll-mt-20">
           <CardHeader>
-            <CardTitle>{editingProperty ? 'Edit property' : 'Add property'}</CardTitle>
+            <CardTitle>
+              {editingProperty
+                ? form.parentId
+                  ? 'Edit block'
+                  : 'Edit property'
+                : form.parentId
+                  ? `Add block to ${titleById.get(form.parentId) || 'project'}`
+                  : 'Add property'}
+            </CardTitle>
             <CardDescription>
               Fields match the public site: title, location, and the marla line (green badge on cards). Use
               featured to show on the marketing site.
@@ -465,6 +707,50 @@ export default function PropertiesPage() {
                   />
                   <p className="text-xs text-muted-foreground mt-1">
                     Optional URL slug for the project detail page.
+                  </p>
+                </div>
+                <div>
+                  <Label htmlFor="parentId">Parent project</Label>
+                  <select
+                    id="parentId"
+                    className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    value={form.parentId}
+                    disabled={editingHasBlocks}
+                    onChange={(e) => setForm({ ...form, parentId: e.target.value })}
+                  >
+                    <option value="">None — this is a main development</option>
+                    {parentOptions.map((p) => {
+                      const id = propertyId(p as { _id?: string; id?: string })
+                      return (
+                        <option key={id} value={id}>
+                          {String(p.title ?? '')}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {editingHasBlocks
+                      ? 'This project has its own blocks, so it must stay a main development.'
+                      : 'Pick a main project to make this a block / sub-project (e.g. Opal Block under New Metro City).'}
+                  </p>
+                </div>
+                <div>
+                  <Label htmlFor="developmentStatus">Development status</Label>
+                  <select
+                    id="developmentStatus"
+                    className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={form.developmentStatus}
+                    onChange={(e) => setForm({ ...form, developmentStatus: e.target.value })}
+                  >
+                    <option value="">Not specified</option>
+                    {DEVELOPMENT_STATUSES.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Shown on the website so buyers know whether this block is on ground or still being built.
                   </p>
                 </div>
                 <div>
@@ -856,7 +1142,10 @@ export default function PropertiesPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle>All properties</CardTitle>
-              <CardDescription>{filteredProperties.length} properties</CardDescription>
+              <CardDescription>
+                {allProperties.length - blockTotal} main projects · {blockTotal} blocks
+                {searchTerm ? ` · ${filteredProperties.length} matching` : ''}
+              </CardDescription>
             </div>
             <div className="flex items-center space-x-2">
               <div className="relative">
@@ -872,88 +1161,34 @@ export default function PropertiesPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredProperties.map((property: Record<string, unknown>) => {
-              const pid = propertyId(property as { _id?: string; id?: string })
-              const img = resolveDashboardMediaUrl(String(property.primaryImage ?? ''))
-              const rawPrimary = String(property.primaryImage ?? '')
-              const priceVal = property.price
-              const priceLabel =
-                priceVal != null && priceVal !== ''
-                  ? Number(priceVal).toLocaleString(undefined, { maximumFractionDigits: 0 })
-                  : null
-              return (
-                <div key={pid} className="bg-white border rounded-lg overflow-hidden shadow-sm">
-                  {img ? (
-                    <div className="relative w-full h-48 bg-gray-100">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img} alt={String(property.title ?? '')} className="w-full h-48 object-cover" />
-                    </div>
-                  ) : (
-                    <div className="w-full h-48 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-                      No image
-                    </div>
-                  )}
-                  {rawPrimary ? (
-                    <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/80">
-                      <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">Image URL</p>
-                      <p className="text-[11px] font-mono text-gray-600 break-all line-clamp-2" title={rawPrimary}>
-                        {rawPrimary}
-                      </p>
-                    </div>
-                  ) : null}
-                  <div className="p-4">
-                    <div className="flex justify-between items-start mb-2 gap-2">
-                      <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">{String(property.title ?? '')}</h3>
-                      <span
-                        className={`shrink-0 px-2 py-1 text-xs font-medium rounded-full ${
-                          property.status === 'available'
-                            ? 'bg-green-100 text-green-800'
-                            : property.status === 'sold'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                        }`}
-                      >
-                        {String(property.status ?? '')}
-                      </span>
-                    </div>
-                    <p className="text-gray-600 text-sm mb-1 line-clamp-1">{String(property.location ?? '')}</p>
-                    <p className="text-sm text-gray-500 mb-2">{String(property.marla ?? '')}</p>
-                    {priceLabel != null ? (
-                      <p className="text-xl font-bold text-primary-600 mb-3">{priceLabel}</p>
-                    ) : (
-                      <p className="text-sm text-gray-400 mb-3">No price set</p>
-                    )}
-                    {property.featured ? (
-                      <p className="text-xs font-medium text-primary-700 mb-3">Featured on site</p>
-                    ) : null}
-                    <div className="flex space-x-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        type="button"
-                        disabled={!img}
-                        onClick={() => img && window.open(img, '_blank', 'noopener,noreferrer')}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" type="button" onClick={() => startEdit(property)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        type="button"
-                        onClick={() => handleDelete(pid)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+          <div className="space-y-8">
+            {segments.map((segment) =>
+              segment.kind === 'grid' ? (
+                <div
+                  key={`grid-${propertyId(segment.items[0] as { _id?: string; id?: string })}`}
+                  className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3"
+                >
+                  {segment.items.map(renderCard)}
+                </div>
+              ) : (
+                <section
+                  key={`family-${propertyId(segment.group.parent as { _id?: string; id?: string })}`}
+                  className="space-y-4"
+                >
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {renderCard(segment.group.parent)}
+                  </div>
+                  <div className="ml-2 sm:ml-6 pl-4 border-l-2 border-primary-200">
+                    <p className="text-sm font-medium text-gray-700 mb-3">
+                      Blocks of {String(segment.group.parent.title ?? '')} ({segment.group.blocks.length})
+                    </p>
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                      {segment.group.blocks.map(renderCard)}
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                </section>
+              ),
+            )}
           </div>
           {filteredProperties.length === 0 && (
             <div className="text-center py-12">

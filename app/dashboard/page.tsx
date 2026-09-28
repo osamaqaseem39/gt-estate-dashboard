@@ -11,7 +11,7 @@ import type { LoanApplication } from '@/lib/loan-applications'
 export default function DashboardPage() {
   const { data: stats } = useQuery('dashboard-stats', async () => {
     const [properties, inquiries, loanApplications, news, gallery] = await Promise.all([
-      api.get('/properties').then(res => res.data),
+      api.get('/properties', { params: { scope: 'all' } }).then(res => res.data),
       api.get('/inquiries').then(res => res.data),
       api.get('/loan-applications').then(res => res.data).catch(() => []),
       api.get('/news').then(res => res.data),

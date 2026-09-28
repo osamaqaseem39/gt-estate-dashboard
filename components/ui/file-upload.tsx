@@ -2,11 +2,11 @@
 
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, X, Loader2 } from 'lucide-react'
+import { Upload, X, Loader2, Download } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
-import { resolveDashboardMediaUrl } from '@/lib/api'
+import { downloadDashboardMedia, resolveDashboardMediaUrl } from '@/lib/api'
 import {
   assertImageFileWithinUploadLimit,
   getMaxImageUploadLabel,
@@ -37,6 +37,7 @@ export function FileUpload({
   disabled,
 }: FileUploadProps) {
   const [uploading, setUploading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   const onDrop = useCallback(
     async (accepted: File[]) => {
@@ -52,6 +53,7 @@ export function FileUpload({
       try {
         const url = await uploadFileViaUploadApi(file)
         onChange(url)
+        toast.success('Image uploaded')
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Upload failed')
       } finally {
@@ -99,14 +101,35 @@ export function FileUpload({
         <div className={cn('relative w-full max-w-[220px] overflow-hidden rounded-md border bg-gray-100', previewAspect)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={previewSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />
-          <button
-            type="button"
-            onClick={() => onChange('')}
-            className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
-            aria-label="Remove image"
-          >
-            <X className="h-3 w-3" />
-          </button>
+          <div className="absolute right-1 top-1 flex gap-1">
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation()
+                setDownloading(true)
+                try {
+                  await downloadDashboardMedia(value)
+                } catch {
+                  toast.error('Could not download image')
+                } finally {
+                  setDownloading(false)
+                }
+              }}
+              className="rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+              aria-label="Download image"
+              disabled={downloading}
+            >
+              {downloading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange('')}
+              className="rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+              aria-label="Remove image"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -116,6 +139,24 @@ export function FileUpload({
         placeholder="Or paste an image URL"
         disabled={disabled || uploading}
       />
+      {value.trim() ? (
+        <button
+          type="button"
+          onClick={async () => {
+            setDownloading(true)
+            try {
+              await downloadDashboardMedia(value)
+            } catch {
+              toast.error('Could not download image')
+            } finally {
+              setDownloading(false)
+            }
+          }}
+          className="text-left text-xs text-primary-700 underline-offset-2 hover:underline"
+        >
+          Download image file
+        </button>
+      ) : null}
     </div>
   )
 }

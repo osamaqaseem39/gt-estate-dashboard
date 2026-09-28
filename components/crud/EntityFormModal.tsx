@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,12 @@ export interface EntityFormModalProps {
   description?: string
   fields: EntityField[]
   defaultValues: EntityFormValues
+  /**
+   * Stable key for the record being edited (e.g. id or "create").
+   * Form values are only reset when the modal opens or this key changes —
+   * not when the parent re-renders with a fresh defaultValues object.
+   */
+  formResetKey: string
   onSubmit: (values: EntityFormValues) => Promise<void>
   submitLabel?: string
 }
@@ -37,6 +43,7 @@ export function EntityFormModal({
   description,
   fields,
   defaultValues,
+  formResetKey,
   onSubmit,
   submitLabel,
 }: EntityFormModalProps) {
@@ -48,10 +55,15 @@ export function EntityFormModal({
     formState: { isSubmitting },
   } = useForm<EntityFormValues>({ defaultValues })
 
+  // Capture the latest defaults without putting the object in the effect deps —
+  // EntityListPage builds a new defaultValues object every render.
+  const defaultsRef = useRef(defaultValues)
+  defaultsRef.current = defaultValues
+
   useEffect(() => {
-    if (open) reset(defaultValues)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultValues])
+    if (!open) return
+    reset(defaultsRef.current)
+  }, [open, formResetKey, reset])
 
   if (!open) return null
 

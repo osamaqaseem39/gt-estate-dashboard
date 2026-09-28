@@ -135,7 +135,11 @@ function extractImageUrl(parsed: unknown, rawText: string): string | null {
       o.src,
     ]
     for (const c of candidates) {
-      if (typeof c === 'string' && /^https?:\/\//i.test(c.trim())) return c.trim()
+      if (typeof c !== 'string') continue
+      const t = c.trim()
+      if (!t) continue
+      // Absolute https URLs, protocol-relative, or site-relative /uploads/... paths
+      if (/^https?:\/\//i.test(t) || t.startsWith('//') || t.startsWith('/')) return t
     }
   }
   const line = rawText.trim().split(/\r?\n/)[0]?.replace(/^["']|["']$/g, '') ?? ''

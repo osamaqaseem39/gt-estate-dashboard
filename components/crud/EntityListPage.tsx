@@ -174,6 +174,7 @@ export function EntityListPage<T>({
         title={formTitle ? formTitle(editingRow) : editingRow ? `Edit ${title}` : `Add ${title}`}
         fields={fields}
         defaultValues={getFormDefaults(editingRow)}
+        formResetKey={editingRow ? getId(editingRow) : 'create'}
         onSubmit={handleSubmit}
         submitLabel={editingRow ? 'Save Changes' : 'Create'}
       />

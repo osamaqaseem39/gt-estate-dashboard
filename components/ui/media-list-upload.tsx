@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { ArrowDown, ArrowUp, Loader2, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Download, Loader2, Upload, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { resolveDashboardMediaUrl } from '@/lib/api'
+import { downloadDashboardMedia, resolveDashboardMediaUrl } from '@/lib/api'
 import {
   assertImageFileWithinUploadLimit,
   getMaxImageUploadLabel,
@@ -28,8 +28,11 @@ export interface MediaListUploadProps {
  */
 export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps) {
   const items = Array.isArray(value) ? value : []
+  const itemsRef = useRef(items)
+  itemsRef.current = items
   const [uploading, setUploading] = useState(0)
   const [urlDraft, setUrlDraft] = useState('')
+  const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null)
   const isVideo = kind === 'video'
 
   const onDrop = useCallback(
@@ -55,9 +58,14 @@ export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps)
           setUploading((n) => n - 1)
         }
       }
-      if (uploaded.length) onChange([...items, ...uploaded])
+      if (uploaded.length) {
+        onChange([...itemsRef.current, ...uploaded])
+        toast.success(
+          `${uploaded.length} ${isVideo ? 'video' : 'image'}${uploaded.length === 1 ? '' : 's'} uploaded`,
+        )
+      }
     },
-    [items, onChange],
+    [onChange, isVideo],
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -83,6 +91,17 @@ export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps)
     if (!url) return
     onChange([...items, { url, alt: '', title: '' }])
     setUrlDraft('')
+  }
+
+  const handleDownload = async (item: MediaItem, index: number) => {
+    setDownloadingIndex(index)
+    try {
+      await downloadDashboardMedia(item.url, item.title?.trim() || undefined)
+    } catch {
+      toast.error('Could not download file')
+    } finally {
+      setDownloadingIndex(null)
+    }
   }
 
   return (
@@ -144,9 +163,14 @@ export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps)
                 )}
               </div>
               <div className="grid min-w-0 flex-1 gap-1.5">
-                <p className="truncate font-mono text-[11px] text-gray-500" title={item.url}>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(item, i)}
+                  className="truncate text-left font-mono text-[11px] text-primary-700 underline-offset-2 hover:underline"
+                  title="Download / open file"
+                >
                   {item.url}
-                </p>
+                </button>
                 <div className={cn('grid gap-1.5', !isVideo && 'sm:grid-cols-2')}>
                   {!isVideo && (
                     <Input
@@ -165,13 +189,43 @@ export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps)
                 </div>
               </div>
               <div className="flex shrink-0 flex-col gap-0.5">
-                <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30" aria-label="Move up">
+                <button
+                  type="button"
+                  onClick={() => handleDownload(item, i)}
+                  disabled={downloadingIndex === i}
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30"
+                  aria-label="Download"
+                >
+                  {downloadingIndex === i ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30"
+                  aria-label="Move up"
+                >
                   <ArrowUp className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove">
+                <button
+                  type="button"
+                  onClick={() => onChange(items.filter((_, j) => j !== i))}
+                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  aria-label="Remove"
+                >
                   <X className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" onClick={() => move(i, 1)} disabled={i === items.length - 1} className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30" aria-label="Move down">
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === items.length - 1}
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30"
+                  aria-label="Move down"
+                >
                   <ArrowDown className="h-3.5 w-3.5" />
                 </button>
               </div>
