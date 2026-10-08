@@ -133,6 +133,8 @@ export function MediaListUpload({ value, onChange, kind }: MediaListUploadProps)
         <Input
           value={urlDraft}
           onChange={(e) => setUrlDraft(e.target.value)}
+          // Commit a pasted URL when focus leaves the box, so clicking Save/Create without "Add" doesn't drop it.
+          onBlur={addUrl}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()

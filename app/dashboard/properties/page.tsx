@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Plus, Search, Edit, Trash2, Eye, X, ArrowUp, ArrowDown, Layers, Download } from 'lucide-react'
 import { MediaListUpload } from '@/components/ui/media-list-upload'
+import { FileUpload } from '@/components/ui/file-upload'
 import type { MediaItem } from '@/components/crud/types'
 import { api, resolveDashboardMediaUrl, downloadDashboardMedia } from '@/lib/api'
 import {
@@ -129,6 +130,22 @@ function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
+/** Photos stored in the legacy `images[]` relation (isPrimary flag) rather than primaryImage/gallery. */
+function legacyImages(property: Record<string, unknown>): { primary: string; others: GalleryEntry[] } {
+  const images = Array.isArray(property.images)
+    ? (property.images as Array<{ url?: string; alt?: string; titleTag?: string; isPrimary?: boolean }>).filter(
+        (img) => img?.url,
+      )
+    : []
+  const primary = images.find((img) => img.isPrimary) ?? images[0]
+  return {
+    primary: primary?.url ?? '',
+    others: images
+      .filter((img) => img !== primary)
+      .map((img) => ({ url: String(img.url), alt: img.alt ?? '', title: img.titleTag ?? '' })),
+  }
+}
+
 function propertyId(p: { _id?: string; id?: string }) {
   return p._id ?? p.id ?? ''
 }
@@ -213,28 +230,10 @@ export default function PropertiesPage() {
   const [editingProperty, setEditingProperty] = useState<Record<string, unknown> | null>(null)
   const [form, setForm] = useState<PropertyFormState>(emptyForm)
   const [saving, setSaving] = useState(false)
-  const [primaryFile, setPrimaryFile] = useState<File | null>(null)
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [quickAddUrl, setQuickAddUrl] = useState('')
-  const primaryInputRef = useRef<HTMLInputElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
-  const [primaryObjectUrl, setPrimaryObjectUrl] = useState<string | null>(null)
   const formCardRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!primaryFile) {
-      setPrimaryObjectUrl(null)
-      return
-    }
-    const url = URL.createObjectURL(primaryFile)
-    setPrimaryObjectUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [primaryFile])
-
-  const primaryPreviewSrc = primaryObjectUrl || resolveDashboardMediaUrl(form.primaryImageUrl.trim())
-  const primaryUrlDisplay = primaryFile
-    ? `Pending upload: ${primaryFile.name}`
-    : form.primaryImageUrl.trim() || '—'
 
   const { data: properties, refetch } = useQuery('properties', async () => {
     const response = await api.get('/properties', { params: { scope: 'all' } })
@@ -268,9 +267,7 @@ export default function PropertiesPage() {
   }
 
   const resetFiles = () => {
-    setPrimaryFile(null)
     setQuickAddUrl('')
-    if (primaryInputRef.current) primaryInputRef.current.value = ''
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
 
@@ -295,9 +292,12 @@ export default function PropertiesPage() {
 
   const startEdit = (property: Record<string, unknown>) => {
     setEditingProperty(property)
-    const gallery = Array.isArray(property.gallery)
+    const legacy = legacyImages(property)
+    const savedGallery = Array.isArray(property.gallery)
       ? (property.gallery as unknown[]).map(normalizeGalleryEntry).filter((g): g is GalleryEntry => g !== null)
       : []
+    // Older records keep photos in images[] only; surface them so they can be edited and re-saved.
+    const gallery = savedGallery.length ? savedGallery : legacy.others
     setForm({
       title: String(property.title ?? ''),
       slug: String(property.slug ?? ''),
@@ -311,7 +311,7 @@ export default function PropertiesPage() {
       developmentStatus: String(property.developmentStatus ?? ''),
       featured: Boolean(property.featured),
       sortOrder: property.sortOrder != null ? String(property.sortOrder) : '0',
-      primaryImageUrl: String(property.primaryImage ?? ''),
+      primaryImageUrl: String(property.primaryImage || legacy.primary),
       gallery,
       inventory: stringifyJsonField(property.inventory, '[]'),
       paymentPlan: stringifyJsonField(
@@ -419,10 +419,7 @@ export default function PropertiesPage() {
     try {
       const id = editingProperty ? propertyId(editingProperty as { _id?: string; id?: string }) : ''
 
-      let primaryImage = form.primaryImageUrl.trim()
-      if (primaryFile) {
-        primaryImage = await uploadFileViaUploadApi(primaryFile)
-      }
+      const primaryImage = form.primaryImageUrl.trim()
 
       const gallery = form.gallery
         .map((g) => ({ url: g.url.trim(), alt: g.alt.trim(), title: g.title.trim() }))
@@ -517,8 +514,8 @@ export default function PropertiesPage() {
 
   const renderCard = (property: PropertyRecord) => {
     const pid = propertyId(property as { _id?: string; id?: string })
-    const img = resolveDashboardMediaUrl(String(property.primaryImage ?? ''))
-    const rawPrimary = String(property.primaryImage ?? '')
+    const rawPrimary = String(property.primaryImage || legacyImages(property).primary)
+    const img = resolveDashboardMediaUrl(rawPrimary)
     const priceVal = property.price
     const priceLabel =
       priceVal != null && priceVal !== ''
@@ -829,67 +826,17 @@ export default function PropertiesPage() {
                   />
                   <p className="text-xs text-muted-foreground mt-1">Lower numbers appear first in lists.</p>
                 </div>
-                <div>
-                  <Label htmlFor="primaryImageUrl">Primary image URL (optional)</Label>
-                  <Input
-                    id="primaryImageUrl"
-                    value={form.primaryImageUrl}
-                    onChange={(e) => setForm({ ...form, primaryImageUrl: e.target.value })}
-                    placeholder="https://… or /uploads/properties/…"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="primaryFile">Or upload primary image</Label>
-                  <Input
-                    id="primaryFile"
-                    ref={primaryInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="cursor-pointer"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null
-                      if (f) {
-                        try {
-                          assertImageFileWithinUploadLimit(f)
-                        } catch (err) {
-                          toast.error(err instanceof Error ? err.message : 'File too large')
-                          e.target.value = ''
-                          setPrimaryFile(null)
-                          return
-                        }
-                      }
-                      setPrimaryFile(f)
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Files are POSTed to your upload API first; the returned URL is sent to the estate API (
-                    <code className="text-[11px]">NEXT_PUBLIC_UPLOAD_API_URL</code>). Max{' '}
-                    {getMaxImageUploadLabel()} per file.
+                <div className="md:col-span-2">
+                  <Label>Primary image</Label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Main photo on project cards and the top of the detail page. Drop a new file to replace it
+                    (uploads immediately), or paste an image URL. Click Save to apply.
                   </p>
+                  <FileUpload
+                    value={form.primaryImageUrl}
+                    onChange={(url) => setForm((prev) => ({ ...prev, primaryImageUrl: url }))}
+                  />
                 </div>
-                {(primaryPreviewSrc || primaryUrlDisplay !== '—') && (
-                  <div className="md:col-span-2 rounded-lg border border-input bg-muted/30 p-3">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Primary image preview</p>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      {primaryPreviewSrc ? (
-                        <div className="shrink-0 w-full sm:w-44 h-32 rounded-md overflow-hidden bg-gray-200 border border-gray-200">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={primaryPreviewSrc}
-                            alt=""
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      ) : null}
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <p className="text-xs text-muted-foreground">URL</p>
-                        <p className="text-xs break-all font-mono bg-background border rounded px-2 py-1.5 text-gray-800">
-                          {primaryUrlDisplay}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 <div className="md:col-span-2 space-y-2">
                   <Label>Gallery images</Label>
                   <p className="text-xs text-muted-foreground">
@@ -917,6 +864,7 @@ export default function PropertiesPage() {
                     <Input
                       value={quickAddUrl}
                       onChange={(e) => setQuickAddUrl(e.target.value)}
+                      onBlur={handleQuickAddUrl}
                       placeholder="Or paste an image URL"
                       className="max-w-xs"
                     />

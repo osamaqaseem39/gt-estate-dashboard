@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { X } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -52,7 +53,7 @@ export function EntityFormModal({
     register,
     handleSubmit,
     reset,
-    formState: { isSubmitting },
+    formState: { isSubmitting, errors },
   } = useForm<EntityFormValues>({ defaultValues })
 
   // Capture the latest defaults without putting the object in the effect deps —
@@ -67,9 +68,15 @@ export function EntityFormModal({
 
   if (!open) return null
 
-  const submit = handleSubmit(async (values) => {
-    await onSubmit(values)
-  })
+  const submit = handleSubmit(
+    async (values) => {
+      await onSubmit(values)
+    },
+    (invalid) => {
+      const missing = fields.filter((f) => invalid[f.name]).map((f) => f.label)
+      toast.error(`Please fill in: ${missing.join(', ')}`)
+    },
+  )
 
   return (
     <div className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-12 sm:pt-20">
@@ -186,6 +193,9 @@ export function EntityFormModal({
                   />
                 ) : null}
 
+                {errors[field.name] && (
+                  <p className="mt-1 text-xs text-red-600">{field.label} is required</p>
+                )}
                 {field.helpText && <p className="mt-1 text-xs text-gray-500">{field.helpText}</p>}
               </div>
             ))}
