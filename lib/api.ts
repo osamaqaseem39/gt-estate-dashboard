@@ -69,6 +69,9 @@ export const API_AXIOS_BASE = axiosBase
 
 export const api = axios.create({
   baseURL: axiosBase,
+  // gt-estate-server is a serverless function that can take several seconds to cold-start
+  // (Nest bootstrap + Prisma connecting to Atlas). Give it real room before failing.
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },

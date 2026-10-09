@@ -15,6 +15,25 @@ interface LoginForm {
   password: string
 }
 
+/** No HTTP response at all means it never reached the server (timeout, cold start, network drop). */
+function isTransientError(error: unknown): boolean {
+  const err = error as { response?: unknown; code?: string }
+  return !err?.response
+}
+
+function describeLoginError(error: unknown): string {
+  const err = error as { response?: { status?: number; data?: { message?: string } }; code?: string }
+  if (!err?.response) {
+    return err?.code === 'ECONNABORTED'
+      ? 'The server took too long to respond. Please try again.'
+      : 'Could not reach the server. Check your connection and try again.'
+  }
+  if (err.response.status === 401) {
+    return 'Invalid email or password.'
+  }
+  return err.response.data?.message || `Login failed (${err.response.status}). Please try again.`
+}
+
 export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -24,11 +43,21 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     setLoading(true)
     try {
-      await login(data.email, data.password)
+      try {
+        await login(data.email, data.password)
+      } catch (error) {
+        // The backend is a serverless function that can cold-start slowly; a timeout or
+        // network error here isn't a credentials problem, so retry once before giving up.
+        if (isTransientError(error)) {
+          await login(data.email, data.password)
+        } else {
+          throw error
+        }
+      }
       toast.success('Login successful!')
       router.push('/dashboard')
     } catch (error) {
-      toast.error('Invalid credentials')
+      toast.error(describeLoginError(error))
     } finally {
       setLoading(false)
     }
